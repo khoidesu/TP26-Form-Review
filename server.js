@@ -251,6 +251,185 @@ app.post('/api/delete-reviewer', async (req, res) => {
   }
 });
 
+// GET /api/gemini/models - Fetch available models supporting generateContent for the key
+app.get('/api/gemini/models', async (req, res) => {
+  const apiKey = req.headers['x-gemini-key'] || req.query.apiKey;
+  if (!apiKey || !apiKey.trim()) {
+    return res.status(400).json({ error: 'Vui lòng cung cấp Gemini API Key!' });
+  }
+
+  try {
+    const url = `https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey.trim()}`;
+    const response = await fetch(url);
+    const data = await response.json();
+
+    if (!response.ok) {
+      return res.status(response.status).json({
+        error: data.error?.message || `Lỗi truy vấn danh sách model (HTTP ${response.status})`
+      });
+    }
+
+    const models = (data.models || [])
+      .filter(m => m.supportedGenerationMethods && m.supportedGenerationMethods.includes('generateContent'))
+      .map(m => {
+        const id = m.name.replace(/^models\//, '');
+        return {
+          id,
+          displayName: m.displayName || id,
+          description: m.description || ''
+        };
+      });
+
+    res.json({ success: true, models });
+  } catch (error) {
+    console.error('Error fetching Gemini models:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Helper to check if a model is deprecated, not found, or unsupported
+function isGeminiModelUnavailable(err) {
+  const msg = (err?.message || '').toLowerCase();
+  return msg.includes('is not found') || 
+         msg.includes('no longer available') || 
+         msg.includes('not supported') ||
+         msg.includes('not found for api version');
+}
+
+// POST /api/gemini/test-key - Test if a Gemini API key is valid
+app.post('/api/gemini/test-key', async (req, res) => {
+  const apiKey = req.headers['x-gemini-key'] || req.body.apiKey;
+  if (!apiKey || !apiKey.trim()) {
+    return res.status(400).json({ error: 'Vui lòng cung cấp Gemini API Key!' });
+  }
+
+  const model = req.body.model || 'gemini-3.8-flash';
+  let url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey.trim()}`;
+
+  try {
+    let response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: 'Ping' }] }]
+      })
+    });
+
+    let data = await response.json();
+
+    // Auto-fallback if the specified model is no longer available or not found
+    if (!response.ok && isGeminiModelUnavailable(data.error)) {
+      const fallbackModel = model === 'gemini-3.8-flash' ? 'gemini-3.5-flash-lite' : 'gemini-3.8-flash';
+      url = `https://generativelanguage.googleapis.com/v1beta/models/${fallbackModel}:generateContent?key=${apiKey.trim()}`;
+      response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: 'Ping' }] }]
+        })
+      });
+      data = await response.json();
+    }
+
+    if (!response.ok) {
+      return res.status(response.status).json({
+        error: data.error?.message || `API Key không hợp lệ (HTTP ${response.status})`
+      });
+    }
+
+    res.json({ success: true, message: 'Gemini API Key hợp lệ và sẵn sàng hoạt động!' });
+  } catch (error) {
+    console.error('Error testing Gemini key:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// POST /api/gemini/suggest - Call Gemini to analyze candidate responses and suggest score/comment
+app.post('/api/gemini/suggest', async (req, res) => {
+  const apiKey = req.headers['x-gemini-key'] || req.body.apiKey;
+  if (!apiKey || !apiKey.trim()) {
+    return res.status(400).json({ error: 'Chưa có Gemini API Key! Vui lòng cài đặt API Key cá nhân.' });
+  }
+
+  const { prompt, systemInstruction, model } = req.body;
+  if (!prompt) {
+    return res.status(400).json({ error: 'Thiếu nội dung bài làm ứng viên cần phân tích!' });
+  }
+
+  const modelName = model || 'gemini-3.8-flash';
+  let url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey.trim()}`;
+
+  try {
+    const payload = {
+      contents: [
+        {
+          role: 'user',
+          parts: [{ text: prompt }]
+        }
+      ],
+      generationConfig: {
+        temperature: 0.2,
+        responseMimeType: 'application/json'
+      }
+    };
+
+    if (systemInstruction) {
+      payload.systemInstruction = {
+        parts: [{ text: systemInstruction }]
+      };
+    }
+
+    let response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+
+    let data = await response.json();
+
+    // Auto-fallback if the specified model is no longer available or not found
+    if (!response.ok && isGeminiModelUnavailable(data.error)) {
+      const fallbackModel = modelName === 'gemini-3.8-flash' ? 'gemini-3.5-flash-lite' : 'gemini-3.8-flash';
+      console.warn(`Model ${modelName} unavailable, falling back to ${fallbackModel}...`);
+      const fallbackUrl = `https://generativelanguage.googleapis.com/v1beta/models/${fallbackModel}:generateContent?key=${apiKey.trim()}`;
+      response = await fetch(fallbackUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      data = await response.json();
+    }
+
+    if (!response.ok) {
+      return res.status(response.status).json({
+        error: data.error?.message || `Lỗi Gemini API (HTTP ${response.status})`
+      });
+    }
+
+    const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+    if (!text) {
+      return res.status(500).json({ error: 'Gemini không trả về phản hồi hợp lệ.' });
+    }
+
+    let parsed;
+    try {
+      parsed = JSON.parse(text);
+    } catch (e) {
+      const match = text.match(/\{[\s\S]*\}/);
+      if (match) {
+        parsed = JSON.parse(match[0]);
+      } else {
+        parsed = { rawText: text };
+      }
+    }
+
+    res.json({ success: true, result: parsed });
+  } catch (error) {
+    console.error('Error calling Gemini suggest:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // GET /api/export-excel - Export Excel file with Reviewer comments and scores
 app.get('/api/export-excel', async (req, res) => {
   try {

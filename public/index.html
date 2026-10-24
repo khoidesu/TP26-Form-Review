@@ -53,10 +53,16 @@
                 <span class="label-icon">👤</span>
                 Người chấm
               </label>
-              <button id="manage-reviewers-btn" class="btn-text-action" type="button"
-                title="Xem & quản lý các tài khoản">
-                <span>⚙️</span> Quản lý tài khoản
-              </button>
+              <div style="display: flex; gap: 8px; align-items: center;">
+                <button id="setup-gemini-key-btn" class="btn-text-action" type="button"
+                  title="Cài đặt Gemini API Key cá nhân của bạn">
+                  <span>🔑</span> Gemini Key <span id="setup-key-status-dot" class="key-status-dot dot-missing"></span>
+                </button>
+                <button id="manage-reviewers-btn" class="btn-text-action" type="button"
+                  title="Xem & quản lý các tài khoản">
+                  <span>⚙️</span> Quản lý
+                </button>
+              </div>
             </div>
             <div class="reviewer-select-row">
               <div class="select-wrapper">
@@ -237,6 +243,60 @@
               <!-- Comment input -->
               <div class="comment-section">
                 <textarea id="comment-input" placeholder="Nhập nhận xét của bạn về form này..." rows="5"></textarea>
+              </div>
+
+              <!-- AI Suggestion Section -->
+              <div class="ai-suggestion-section">
+                <div class="ai-btn-row">
+                  <button id="ai-suggest-btn" class="btn btn-ai-suggest" type="button" title="Dùng AI Gemini phân tích bài làm & gợi ý điểm số">
+                    <span class="ai-sparkle-icon">✨</span>
+                    <span id="ai-btn-label">Gợi ý điểm & nhận xét (AI)</span>
+                  </button>
+                  <button id="ai-key-config-btn" class="btn btn-ghost btn-sm ai-key-btn" type="button" title="Cài đặt / Đổi Gemini API Key cá nhân">
+                    <span>🔑</span>
+                    <span class="ai-key-label">API Key</span>
+                    <span id="ai-key-status-dot" class="key-status-dot dot-missing" title="Chưa có API Key"></span>
+                  </button>
+                </div>
+
+                <!-- AI Suggestion Result Box -->
+                <div id="ai-result-box" class="ai-result-box" style="display: none;">
+                  <div class="ai-result-header">
+                    <div class="ai-result-title">
+                      <span class="ai-badge-icon">🤖</span>
+                      <strong>Gemini AI gợi ý đánh giá:</strong>
+                    </div>
+                    <div class="ai-suggested-score-badge" id="ai-suggested-score-badge">
+                      <span id="ai-score-stars">⭐ 4đ</span>
+                      <span id="ai-score-label" class="ai-score-tag">Tốt</span>
+                    </div>
+                  </div>
+
+                  <div class="ai-result-body">
+                    <div class="ai-analysis-item" id="ai-highlights-item">
+                      <div class="ai-analysis-label">🌟 Điểm sáng nổi bật:</div>
+                      <div class="ai-analysis-text" id="ai-highlights-text">...</div>
+                    </div>
+                    <div class="ai-analysis-item" id="ai-concerns-item">
+                      <div class="ai-analysis-label">⚠️ Điểm cần lưu ý:</div>
+                      <div class="ai-analysis-text" id="ai-concerns-text">...</div>
+                    </div>
+                    <div class="ai-comment-preview">
+                      <div class="ai-analysis-label">💬 Nhận xét đề xuất cho giám khảo:</div>
+                      <div class="ai-comment-box" id="ai-comment-box">...</div>
+                    </div>
+                  </div>
+
+                  <div class="ai-result-footer">
+                    <button id="ai-apply-btn" class="btn btn-primary btn-sm" type="button" title="Điền điểm và nhận xét này vào bài chấm">
+                      <span>✅</span> Áp dụng điểm & nhận xét
+                    </button>
+                    <button id="ai-copy-btn" class="btn btn-ghost btn-sm" type="button" title="Sao chép nội dung nhận xét">
+                      <span>📋</span> Sao chép
+                    </button>
+                    <button id="ai-dismiss-btn" class="btn btn-ghost btn-sm" type="button" title="Đóng bảng gợi ý">✕</button>
+                  </div>
+                </div>
               </div>
 
               <!-- Save button -->
@@ -630,6 +690,80 @@
       </div>
       <div class="modal-footer">
         <button id="close-manage-btn" class="btn btn-primary" type="button">Đóng</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 4. Gemini API Key Configuration Modal -->
+  <div id="gemini-key-modal" class="modal-backdrop" style="display: none;">
+    <div class="modal-box glass-card gemini-modal-box">
+      <div class="modal-header">
+        <div class="modal-title-group">
+          <span class="modal-icon">🤖</span>
+          <div>
+            <h3>Cài đặt Gemini API Key cá nhân</h3>
+            <p class="modal-sub">Gắn API cá nhân để dùng tính năng AI hỗ trợ gợi ý chấm điểm</p>
+          </div>
+        </div>
+        <button class="modal-close-btn" id="close-gemini-modal-btn" title="Đóng">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="gemini-guide-banner">
+          <div class="gemini-guide-icon">💡</div>
+          <div class="gemini-guide-text">
+            <strong>Gemini API Key hoàn toàn miễn phí từ Google!</strong>
+            <p>Mỗi giám khảo dùng key riêng để độc lập giới hạn quota gọi và đảm bảo tính bảo mật.</p>
+            <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener" class="gemini-link">
+              👉 Nhấp vào đây để lấy Gemini API Key miễn phí (Google AI Studio) ↗
+            </a>
+          </div>
+        </div>
+
+        <div class="form-group" style="margin-top: 18px;">
+          <label for="gemini-api-key-input">
+            <span class="label-icon">🔑</span>
+            Gemini API Key của <strong id="gemini-reviewer-target">bạn</strong>:
+          </label>
+          <div class="input-with-toggle">
+            <input type="password" id="gemini-api-key-input" placeholder="Dán API Key dạng: AIzaSy..." autocomplete="off">
+            <button type="button" id="toggle-key-visibility-btn" class="btn btn-ghost btn-sm" title="Hiện/Ẩn Key">👁️</button>
+          </div>
+          <div id="gemini-key-test-status" class="key-test-status" style="display: none;"></div>
+        </div>
+
+        <div class="gemini-model-select-group">
+          <div class="gemini-model-header">
+            <label for="gemini-model-select">Mô hình AI ưu tiên:</label>
+            <button id="fetch-gemini-models-btn" type="button" class="btn-text-action" title="Quét danh sách các model khả dụng trực tiếp từ Google AI Studio">
+              🔄 Tải danh sách từ Key
+            </button>
+          </div>
+          <select id="gemini-model-select">
+            <option value="gemini-3.8-flash">Gemini 3.8 Flash (Mới nhất — Nhanh & chuẩn xác, khuyên dùng)</option>
+            <option value="gemini-3.5-flash-lite">Gemini 3.5 Flash Lite (Siêu nhanh, tối ưu hạn mức)</option>
+            <option value="gemini-3-pro">Gemini 3 Pro (Suy luận sâu sắc, đánh giá chi tiết)</option>
+            <option value="gemini-2.0-flash">Gemini 2.0 Flash (Thế hệ 2.0 ổn định)</option>
+            <option value="custom">⚙️ Tùy chỉnh (Nhập tên model khác...)</option>
+          </select>
+          <input type="text" id="gemini-custom-model-input" placeholder="Nhập mã model (ví dụ: gemini-3.8-flash)" autocomplete="off" style="display: none;">
+        </div>
+
+        <div class="gemini-privacy-note">
+          🔒 <strong>Bảo mật riêng tư:</strong> API Key được lưu trực tiếp trong trình duyệt (LocalStorage) của riêng bạn và chỉ dùng khi bạn nhấn nút "Gợi ý điểm", không lưu trên Google Sheet hay chia sẻ với bất kỳ ai khác.
+        </div>
+      </div>
+      <div class="modal-footer gemini-modal-footer">
+        <button id="test-gemini-key-btn" class="btn btn-ghost" type="button">
+          <span>⚡</span> Kiểm tra Key
+        </button>
+        <div style="display: flex; gap: 8px;">
+          <button id="delete-gemini-key-btn" class="btn btn-danger-ghost" type="button" style="display: none;">
+            <span>🗑️</span> Xóa Key
+          </button>
+          <button id="save-gemini-key-btn" class="btn btn-primary" type="button">
+            <span>💾</span> Lưu API Key
+          </button>
+        </div>
       </div>
     </div>
   </div>

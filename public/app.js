@@ -331,6 +331,7 @@ async function loadData() {
     }
 
     updateSyncStatus('online', 'GG Sheet: Đồng bộ');
+    updateGeminiKeyStatusUi();
 
   } catch (err) {
     console.error('Failed to load data:', err);
@@ -517,7 +518,7 @@ function initSetupScreen() {
   const banBtns = $$('.ban-btn');
   const startBtn = $('#start-btn');
 
-  reviewerSelect.addEventListener('change', () => {
+    reviewerSelect.addEventListener('change', () => {
     const col = parseInt(reviewerSelect.value);
     if (col) {
       const reviewer = state.reviewers.find(r => r.colIndex === col);
@@ -527,7 +528,11 @@ function initSetupScreen() {
       state.selectedReviewer = null;
       state.selectedReviewerCol = null;
     }
+    currentAiSuggestion = null;
+    const aiResultBox = $('#ai-result-box');
+    if (aiResultBox) aiResultBox.style.display = 'none';
     checkStartReady();
+    updateGeminiKeyStatusUi();
   });
 
   if (deleteReviewerBtn) {
@@ -635,7 +640,7 @@ function initSetupScreen() {
   const closeManageBtn = $('#close-manage-btn');
   if (closeManageBtn) closeManageBtn.addEventListener('click', closeManageReviewersModal);
 
-  ['#guide-modal', '#delete-confirm-modal', '#manage-reviewers-modal', '#candidate-detail-modal'].forEach(sel => {
+  ['#guide-modal', '#delete-confirm-modal', '#manage-reviewers-modal', '#candidate-detail-modal', '#gemini-key-modal'].forEach(sel => {
     const modal = $(sel);
     if (modal) {
       modal.addEventListener('click', (e) => {
@@ -644,6 +649,7 @@ function initSetupScreen() {
           else if (sel === '#delete-confirm-modal') closeDeleteReviewerModal();
           else if (sel === '#manage-reviewers-modal') closeManageReviewersModal();
           else if (sel === '#candidate-detail-modal') closeCandidateDetailModal();
+          else if (sel === '#gemini-key-modal') closeGeminiKeyModal();
         }
       });
     }
@@ -661,8 +667,11 @@ function initSetupScreen() {
       const mgModal = $('#manage-reviewers-modal');
       const gdModal = $('#guide-modal');
       const cdModal = $('#candidate-detail-modal');
+      const gmModal = $('#gemini-key-modal');
 
-      if (cdModal && cdModal.style.display !== 'none') {
+      if (gmModal && gmModal.style.display !== 'none') {
+        closeGeminiKeyModal();
+      } else if (cdModal && cdModal.style.display !== 'none') {
         closeCandidateDetailModal();
       } else if (delModal && delModal.style.display !== 'none') {
         closeDeleteReviewerModal();
@@ -890,6 +899,12 @@ function renderCurrentForm() {
   $('#save-status').className = 'save-status';
   const ratingContainer = $('#rating-buttons');
   if (ratingContainer) ratingContainer.classList.remove('rating-required-shake');
+
+  // Reset AI suggestion box on form switch
+  const aiBox = $('#ai-result-box');
+  if (aiBox) aiBox.style.display = 'none';
+  currentAiSuggestion = null;
+  updateGeminiKeyStatusUi();
 
   // Scroll to top
   window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -1240,6 +1255,630 @@ async function exportReviewerEvaluationsAsExcel() {
   }
 }
 
+// ============================================================
+// 🤖 Gemini AI Suggestion & Key Management
+// ============================================================
+
+let currentAiSuggestion = null;
+
+function getSelectedGeminiModel() {
+  const currentRev = state.selectedReviewer;
+  if (currentRev) {
+    const revModel = localStorage.getItem(`gemini_selected_model_${currentRev.trim()}`);
+    if (revModel) return revModel.trim();
+  }
+  return localStorage.getItem('gemini_selected_model') || 'gemini-3.8-flash';
+}
+
+function saveSelectedGeminiModel(model) {
+  if (model && model.trim()) {
+    const cleanModel = model.trim();
+    const currentRev = state.selectedReviewer;
+    if (currentRev) {
+      localStorage.setItem(`gemini_selected_model_${currentRev.trim()}`, cleanModel);
+    }
+    localStorage.setItem('gemini_selected_model', cleanModel);
+  }
+}
+
+function getActiveGeminiModel() {
+  const modelSelect = $('#gemini-model-select');
+  if (!modelSelect) return getSelectedGeminiModel();
+  if (modelSelect.value === 'custom') {
+    const customInput = $('#gemini-custom-model-input');
+    return (customInput?.value || '').trim() || getSelectedGeminiModel();
+  }
+  return modelSelect.value || getSelectedGeminiModel();
+}
+
+function getGeminiApiKey(reviewerName) {
+  // Clear any legacy shared default key so it never bleeds into other reviewers
+  if (localStorage.getItem('gemini_api_key_default')) {
+    localStorage.removeItem('gemini_api_key_default');
+  }
+
+  const currentRev = reviewerName || state.selectedReviewer;
+  if (!currentRev) return '';
+  return (localStorage.getItem(`gemini_api_key_${currentRev.trim()}`) || '').trim();
+}
+
+function saveGeminiApiKey(reviewerName, apiKey) {
+  const cleanKey = (apiKey || '').trim();
+  const currentRev = reviewerName || state.selectedReviewer;
+  if (!currentRev) {
+    showToast('⚠️ Vui lòng chọn người chấm trước khi lưu API Key!', 'error');
+    return false;
+  }
+
+  if (cleanKey) {
+    localStorage.setItem(`gemini_api_key_${currentRev.trim()}`, cleanKey);
+  } else {
+    localStorage.removeItem(`gemini_api_key_${currentRev.trim()}`);
+  }
+
+  // Clear legacy global key
+  localStorage.removeItem('gemini_api_key_default');
+  updateGeminiKeyStatusUi();
+  return true;
+}
+
+function removeGeminiApiKey(reviewerName) {
+  const currentRev = reviewerName || state.selectedReviewer;
+  if (currentRev) {
+    localStorage.removeItem(`gemini_api_key_${currentRev.trim()}`);
+    localStorage.removeItem(`gemini_selected_model_${currentRev.trim()}`);
+  }
+  localStorage.removeItem('gemini_api_key_default');
+  updateGeminiKeyStatusUi();
+}
+
+function updateGeminiKeyStatusUi() {
+  const currentRev = state.selectedReviewer;
+  const key = currentRev ? getGeminiApiKey(currentRev) : '';
+  const hasKey = Boolean(key);
+
+  const setupDot = $('#setup-key-status-dot');
+  if (setupDot) {
+    setupDot.className = `key-status-dot ${hasKey ? 'dot-active' : 'dot-missing'}`;
+    setupDot.title = currentRev
+      ? (hasKey ? `Đã có API Key cho ${currentRev}` : `Chưa cài đặt API Key cho ${currentRev}`)
+      : 'Vui lòng chọn người chấm trước';
+  }
+
+  const evalDot = $('#ai-key-status-dot');
+  if (evalDot) {
+    evalDot.className = `key-status-dot ${hasKey ? 'dot-active' : 'dot-missing'}`;
+    evalDot.title = currentRev
+      ? (hasKey ? `Đã có API Key cho ${currentRev}` : `Chưa có API Key cho ${currentRev}`)
+      : 'Chưa có API Key';
+  }
+}
+
+function isGeminiModelUnavailable(err) {
+  const msg = (err?.message || '').toLowerCase();
+  return msg.includes('is not found') || 
+         msg.includes('no longer available') || 
+         msg.includes('not supported') ||
+         msg.includes('not found for api version');
+}
+
+function openGeminiKeyModal() {
+  const modal = $('#gemini-key-modal');
+  if (!modal) return;
+
+  const currentRev = state.selectedReviewer;
+  if (!currentRev) {
+    showToast('⚠️ Vui lòng chọn Người chấm ở danh sách trước khi cài đặt Gemini API Key cá nhân!', 'warning');
+    const reviewerSelect = $('#reviewer-select');
+    if (reviewerSelect) reviewerSelect.focus();
+    return;
+  }
+
+  const targetEl = $('#gemini-reviewer-target');
+  if (targetEl) targetEl.textContent = currentRev;
+
+  const input = $('#gemini-api-key-input');
+  if (input) {
+    // Only fetch for this specific reviewer - empty if they haven't set one!
+    input.value = getGeminiApiKey(currentRev);
+    input.type = 'password';
+  }
+
+  const deleteBtn = $('#delete-gemini-key-btn');
+  if (deleteBtn) {
+    deleteBtn.style.display = input && input.value ? 'inline-flex' : 'none';
+  }
+
+  const statusEl = $('#gemini-key-test-status');
+  if (statusEl) {
+    statusEl.style.display = 'none';
+    statusEl.textContent = '';
+  }
+
+  // Restore saved model selection
+  const modelSelect = $('#gemini-model-select');
+  const customInput = $('#gemini-custom-model-input');
+  const savedModel = getSelectedGeminiModel();
+  if (modelSelect) {
+    const exists = Array.from(modelSelect.options).some(opt => opt.value === savedModel);
+    if (exists) {
+      modelSelect.value = savedModel;
+      if (customInput) {
+        customInput.style.display = 'none';
+        customInput.value = '';
+      }
+    } else {
+      modelSelect.value = 'custom';
+      if (customInput) {
+        customInput.style.display = 'block';
+        customInput.value = savedModel;
+      }
+    }
+  }
+
+  modal.style.display = 'flex';
+}
+
+function closeGeminiKeyModal() {
+  const modal = $('#gemini-key-modal');
+  if (modal) modal.style.display = 'none';
+}
+
+async function fetchGeminiModels() {
+  const input = $('#gemini-api-key-input');
+  const key = (input ? input.value : '').trim() || getGeminiApiKey();
+  const fetchBtn = $('#fetch-gemini-models-btn');
+  const statusEl = $('#gemini-key-test-status');
+
+  if (!key) {
+    showToast('⚠️ Vui lòng nhập hoặc lưu API Key trước khi quét danh sách mô hình!', 'info');
+    return;
+  }
+
+  if (fetchBtn) {
+    fetchBtn.disabled = true;
+    fetchBtn.textContent = '⏳ Đang quét...';
+  }
+
+  try {
+    let models = [];
+    // 1. Try backend proxy
+    try {
+      const res = await fetch(`${API_BASE}/api/gemini/models?apiKey=${encodeURIComponent(key)}`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success && Array.isArray(data.models) && data.models.length > 0) {
+          models = data.models;
+        }
+      }
+    } catch (e) {
+      // Proxy unavailable, will try direct browser fetch
+    }
+
+    // 2. Direct browser fetch fallback
+    if (!models.length) {
+      const directRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${key}`);
+      const directData = await directRes.json();
+      if (directRes.ok && Array.isArray(directData.models)) {
+        models = directData.models
+          .filter(m => m.supportedGenerationMethods && m.supportedGenerationMethods.includes('generateContent'))
+          .map(m => ({
+            id: m.name.replace(/^models\//, ''),
+            displayName: m.displayName || m.name.replace(/^models\//, '')
+          }));
+      } else if (!directRes.ok) {
+        throw new Error(directData.error?.message || `HTTP ${directRes.status}`);
+      }
+    }
+
+    if (models.length > 0) {
+      const select = $('#gemini-model-select');
+      if (select) {
+        const currentModel = getActiveGeminiModel();
+        select.innerHTML = '';
+
+        // Priority sorting for common generative models: 3.8-flash, 3.5-flash-lite, 3-pro, 2.0-flash
+        const priority = ['gemini-3.8-flash', 'gemini-3.5-flash-lite', 'gemini-3-pro', 'gemini-2.0-flash'];
+        models.sort((a, b) => {
+          const idxA = priority.indexOf(a.id);
+          const idxB = priority.indexOf(b.id);
+          if (idxA !== -1 && idxB !== -1) return idxA - idxB;
+          if (idxA !== -1) return -1;
+          if (idxB !== -1) return 1;
+          return a.id.localeCompare(b.id);
+        });
+
+        models.forEach(m => {
+          const opt = document.createElement('option');
+          opt.value = m.id;
+          opt.textContent = `${m.displayName || m.id} (${m.id})`;
+          select.appendChild(opt);
+        });
+
+        // Add custom option
+        const customOpt = document.createElement('option');
+        customOpt.value = 'custom';
+        customOpt.textContent = '⚙️ Tùy chỉnh (Nhập tên model khác...)';
+        select.appendChild(customOpt);
+
+        const exists = Array.from(select.options).some(o => o.value === currentModel);
+        if (exists) {
+          select.value = currentModel;
+        } else if (select.options.length > 0) {
+          select.selectedIndex = 0;
+          saveSelectedGeminiModel(select.value);
+        }
+      }
+
+      showToast(`✨ Đã tìm thấy ${models.length} mô hình AI khả dụng!`, 'success');
+      if (statusEl) {
+        statusEl.className = 'key-test-status success';
+        statusEl.textContent = `✅ Đã cập nhật ${models.length} model khả dụng từ Google AI Studio.`;
+        statusEl.style.display = 'block';
+      }
+    } else {
+      showToast('⚠️ Không tìm thấy model nào hỗ trợ generateContent.', 'warning');
+    }
+  } catch (err) {
+    console.error('Fetch models error:', err);
+    showToast(`❌ Không thể quét danh sách mô hình: ${err.message}`, 'error');
+  } finally {
+    if (fetchBtn) {
+      fetchBtn.disabled = false;
+      fetchBtn.textContent = '🔄 Tải danh sách từ Key';
+    }
+  }
+}
+
+async function testGeminiApiKey() {
+  const input = $('#gemini-api-key-input');
+  const statusEl = $('#gemini-key-test-status');
+  const testBtn = $('#test-gemini-key-btn');
+
+  const key = (input ? input.value : '').trim();
+  if (!key) {
+    statusEl.className = 'key-test-status error';
+    statusEl.textContent = '⚠️ Vui lòng dán API Key trước khi kiểm tra!';
+    statusEl.style.display = 'block';
+    return;
+  }
+
+  const model = getActiveGeminiModel();
+
+  testBtn.disabled = true;
+  testBtn.innerHTML = '<span>⏳</span> Đang kiểm tra...';
+  statusEl.className = 'key-test-status';
+  statusEl.textContent = `Đang kết nối tới Google AI Studio (Model: ${model})...`;
+  statusEl.style.display = 'block';
+
+  try {
+    let url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`;
+
+    let res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: 'Ping test' }] }]
+      })
+    });
+
+    let data = await res.json();
+
+    // Auto-fallback if the model is no longer available / not found
+    if (!res.ok && isGeminiModelUnavailable(data.error)) {
+      const fallback = model === 'gemini-3.8-flash' ? 'gemini-3.5-flash-lite' : 'gemini-3.8-flash';
+      statusEl.textContent = `Mô hình ${model} không khả dụng, đang tự động thử với ${fallback}...`;
+      url = `https://generativelanguage.googleapis.com/v1beta/models/${fallback}:generateContent?key=${key}`;
+      res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: 'Ping test' }] }]
+        })
+      });
+      data = await res.json();
+      if (res.ok) {
+        saveSelectedGeminiModel(fallback);
+        const sel = $('#gemini-model-select');
+        if (sel) sel.value = fallback;
+      }
+    }
+
+    if (!res.ok) {
+      throw new Error(data.error?.message || `Mã lỗi HTTP ${res.status}`);
+    }
+
+    statusEl.className = 'key-test-status success';
+    statusEl.textContent = `✅ Kết nối thành công! API Key hợp lệ và sẵn sàng hoạt động với model ${getActiveGeminiModel()}.`;
+  } catch (err) {
+    statusEl.className = 'key-test-status error';
+    statusEl.textContent = `❌ Kiểm tra thất bại: ${err.message}`;
+  } finally {
+    testBtn.disabled = false;
+    testBtn.innerHTML = '<span>⚡</span> Kiểm tra Key';
+  }
+}
+
+function buildGeminiSystemPrompt() {
+  return `Bạn là Trợ lý Ban Giám Khảo AI cao cấp trong chiến dịch tuyển chọn nhân tài "TRAINEE PROGRAM 2026 — SIGNAL FROM THE DEEP OCEAN".
+Nhiệm vụ của bạn là đọc kỹ hồ sơ đơn ứng tuyển, phân tích câu trả lời chuyên môn, động lực, kỹ năng và thái độ của ứng viên để đưa ra GỢI Ý ĐIỂM SỐ (1 đến 5 điểm) cùng NHẬN XÉT ĐÁNH GIÁ CÔNG TÂM, SÂU SẮC, GIÚP GIÁM KHẢO TIẾT KIỆM THỜI GIAN NHƯNG VẪN ĐẢM BẢO CHẤT LƯỢNG.
+
+---
+🎯 TIÊU CHÍ & THANG ĐIỂM ĐÁNH GIÁ (1 - 5):
+• 5 điểm (Cực tốt - excellent):
+  - Bài làm cực kỳ xuất sắc, có sự đầu tư tâm huyết rõ rệt, câu trả lời sâu sắc, tư duy logic mạch lạc.
+  - Ban Hệ thống: Nắm vững ngôn ngữ lập trình, kiến trúc hệ thống, tư duy giải thuật/backend/DevOps/công nghệ vững vàng, có sản phẩm/dự án cụ thể hoặc định hướng nghề nghiệp rất rõ nét.
+  - Ban Truyền thông - Sự kiện: Portfolio/sản phẩm thiết kế, quay chụp, tổ chức sự kiện hoặc ý tưởng truyền thông vượt trội, sáng tạo, khả năng xử lý tình huống/sự cố sắc bén.
+  - Thái độ: Tinh thần đồng đội cao, cầu tiến, chủ động, cam kết và phù hợp tuyệt đối với văn hoá tổ chức.
+
+• 4 điểm (Tốt - good):
+  - Bài làm chỉn chu, trả lời đầy đủ và đúng trọng tâm các câu hỏi.
+  - Có nền tảng kiến thức/kỹ năng tốt, có kinh nghiệm hoặc định hướng rõ ràng.
+  - Có thái độ làm việc nhóm tích cực, sẵn sàng học hỏi, tiềm năng phát triển lớn.
+
+• 3 điểm (Tạm - fair):
+  - Đạt mức yêu cầu cơ bản, trả lời ở mức vừa phải nhưng còn chung chung, chưa có nhiều điểm nhấn đặc biệt.
+  - Kiến thức/kỹ năng ở mức nhập môn hoặc còn hạn chế, cần được đào tạo thêm nhiều.
+  - Thái độ ổn định nhưng chưa thể hiện được khát khao hoặc cam kết mạnh mẽ.
+
+• 2 điểm (OK - ok):
+  - Bài làm còn sơ sài, câu trả lời ngắn, chưa đầu tư nhiều tâm huyết.
+  - Kỹ năng còn yếu, chưa có định hướng rõ ràng hoặc chưa hiểu rõ về chương trình.
+  - Cần cân nhắc kỹ trước khi lựa chọn.
+
+• 1 điểm (Tệ - poor):
+  - Trả lời qua loa, cẩu thả, cụt ngủn hoặc có dấu hiệu thiếu nghiêm túc, không tôn trọng ban tổ chức.
+  - Không phù hợp với tiêu chí tuyển chọn của chương trình.
+
+---
+📋 YÊU CẦU ĐỊNH DẠNG ĐẦU RA (JSON BẮT BUỘC):
+Trả về DUY NHẤT một đối tượng JSON hợp lệ (không kèm văn bản mở đầu/kết thúc), cấu trúc chính xác như sau:
+{
+  "suggested_score": 4,
+  "rating_key": "good",
+  "rating_name": "Tốt",
+  "highlights": "Điểm mạnh nổi bật nhất của ứng viên (1-2 câu ngắn gọn, cụ thể).",
+  "concerns": "Điểm cần lưu ý, hạn chế hoặc câu hỏi phỏng vấn thêm nếu có (1-2 câu).",
+  "suggested_comment": "Đoạn nhận xét chuyên nghiệp, súc tích (khoảng 2-3 câu) để giám khảo có thể điền trực tiếp vào ô nhận xét."
+}`;
+}
+
+function buildCandidatePromptForAi(form) {
+  const isCandidateTTSK = isTTSK(form);
+  const banName = isCandidateTTSK ? 'Truyền thông - Sự kiện' : 'Hệ thống';
+  const cols = isCandidateTTSK ? state.ttskCols : state.heThongCols;
+
+  let text = `HỒ SƠ ỨNG VIÊN TRAINEE PROGRAM 2026:
+- ID Ứng viên: #${form.id}
+- Họ và tên: ${form.data[2] || 'N/A'}
+- MSSV: ${form.data[3] || 'N/A'}
+- Lớp sinh hoạt: ${form.data[5] || 'N/A'}
+- Email: ${form.data[4] || 'N/A'}
+- Ban ứng tuyển: ${banName}
+
+---
+CHI TIẾT CÂU TRẢ LỜI CỦA ỨNG VIÊN TRONG ĐƠN:
+`;
+
+  cols.filter(c => c > 5).forEach(c => {
+    const question = state.columnMap[c] || `Cột ${c}`;
+    const answer = form.data[c] || '(Không có câu trả lời)';
+    text += `\n[${question}]\n${answer}\n`;
+  });
+
+  const currentComment = ($('#comment-input')?.value || '').trim();
+  if (currentComment) {
+    text += `\n---
+GHI CHÚ / NHẬN XÉT SƠ BỘ CỦA GIÁM KHẢO (${state.selectedReviewer}):
+"${currentComment}"
+(Lưu ý: Hãy tham khảo nhận xét này của giám khảo để đưa ra gợi ý phù hợp và bổ trợ thêm)\n`;
+  }
+
+  const otherEvals = [];
+  if (form.evaluations) {
+    Object.entries(form.evaluations).forEach(([revName, ev]) => {
+      if (revName !== state.selectedReviewer && (ev.score || ev.comment)) {
+        otherEvals.push(`- Giám khảo ${revName}: ${ev.score ? ev.score + 'đ' : ''} "${ev.comment || ''}"`);
+      }
+    });
+  }
+  if (otherEvals.length > 0) {
+    text += `\n---
+ĐÁNH GIÁ TỪ CÁC GIÁM KHẢO KHÁC ĐÃ CHẤM TRƯỚC ĐÓ (DÙNG ĐỂ THAM KHẢO CHÉO):
+${otherEvals.join('\n')}\n`;
+  }
+
+  return text;
+}
+
+async function requestAiSuggestion() {
+  const currentRev = state.selectedReviewer;
+  if (!currentRev) {
+    showToast('⚠️ Vui lòng chọn người chấm trước khi dùng tính năng AI!', 'info');
+    return;
+  }
+
+  const apiKey = getGeminiApiKey(currentRev);
+  if (!apiKey) {
+    showToast(`⚠️ Người chấm "${currentRev}" chưa cài đặt Gemini API Key riêng!`, 'info');
+    openGeminiKeyModal();
+    return;
+  }
+
+  const form = state.filteredForms[state.currentIndex];
+  if (!form) return;
+
+  const btn = $('#ai-suggest-btn');
+  const btnLabel = $('#ai-btn-label');
+  const originalText = btnLabel ? btnLabel.textContent : 'Gợi ý điểm & nhận xét (AI)';
+
+  if (btn) btn.disabled = true;
+  if (btnLabel) btnLabel.textContent = '⏳ Gemini đang phân tích...';
+
+  try {
+    const systemPrompt = buildGeminiSystemPrompt();
+    const candidatePrompt = buildCandidatePromptForAi(form);
+    const model = getActiveGeminiModel() || 'gemini-3.8-flash';
+
+    let result = null;
+
+    // 1. Try backend proxy if available
+    try {
+      const res = await fetch(`${API_BASE}/api/gemini/suggest`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-gemini-key': apiKey
+        },
+        body: JSON.stringify({
+          prompt: candidatePrompt,
+          systemInstruction: systemPrompt,
+          model: model
+        })
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success && data.result) {
+          result = data.result;
+        }
+      }
+    } catch (proxyErr) {
+      console.warn('Proxy fetch failed, falling back to direct browser Gemini call:', proxyErr.message);
+    }
+
+    // 2. Direct browser Gemini API fallback
+    if (!result) {
+      let url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+      let directRes = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: candidatePrompt }] }],
+          systemInstruction: { parts: [{ text: systemPrompt }] },
+          generationConfig: {
+            temperature: 0.2,
+            responseMimeType: 'application/json'
+          }
+        })
+      });
+
+      let directData = await directRes.json();
+
+      // Auto-fallback if selected model is no longer available / not found
+      if (!directRes.ok && isGeminiModelUnavailable(directData.error)) {
+        const fallbackModel = model === 'gemini-3.8-flash' ? 'gemini-3.5-flash-lite' : 'gemini-3.8-flash';
+        console.warn(`Model ${model} unavailable, falling back to ${fallbackModel}...`);
+        const fallbackUrl = `https://generativelanguage.googleapis.com/v1beta/models/${fallbackModel}:generateContent?key=${apiKey}`;
+        directRes = await fetch(fallbackUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: candidatePrompt }] }],
+            systemInstruction: { parts: [{ text: systemPrompt }] },
+            generationConfig: {
+              temperature: 0.2,
+              responseMimeType: 'application/json'
+            }
+          })
+        });
+        directData = await directRes.json();
+        if (directRes.ok) {
+          saveSelectedGeminiModel(fallbackModel);
+          const sel = $('#gemini-model-select');
+          if (sel) sel.value = fallbackModel;
+        }
+      }
+
+      if (!directRes.ok) {
+        throw new Error(directData.error?.message || `Lỗi Gemini (HTTP ${directRes.status})`);
+      }
+
+      const text = directData.candidates?.[0]?.content?.parts?.[0]?.text;
+      if (!text) throw new Error('Gemini không trả về kết quả!');
+
+      try {
+        result = JSON.parse(text);
+      } catch (parseErr) {
+        const match = text.match(/\{[\s\S]*\}/);
+        if (match) result = JSON.parse(match[0]);
+        else throw new Error('Không thể đọc cấu trúc phản hồi của Gemini!');
+      }
+    }
+
+    if (!result) throw new Error('Không nhận được dữ liệu đánh giá từ AI.');
+
+    displayAiSuggestionResult(result);
+    showToast(`🤖 Gemini đã phân tích xong: gợi ý ${result.suggested_score}đ (${result.rating_name || ''})`, 'success');
+
+  } catch (err) {
+    console.error('Gemini Suggestion error:', err);
+    showToast(`❌ Lỗi AI: ${err.message}`, 'error');
+  } finally {
+    if (btn) btn.disabled = false;
+    if (btnLabel) btnLabel.textContent = originalText;
+  }
+}
+
+function displayAiSuggestionResult(res) {
+  currentAiSuggestion = res;
+  const box = $('#ai-result-box');
+  if (!box) return;
+
+  const scoreBadge = $('#ai-suggested-score-badge');
+  const scoreStars = $('#ai-score-stars');
+  const scoreLabel = $('#ai-score-label');
+  const highlightsText = $('#ai-highlights-text');
+  const concernsText = $('#ai-concerns-text');
+  const commentBox = $('#ai-comment-box');
+
+  const score = parseInt(res.suggested_score) || 3;
+  const ratingKey = res.rating_key || SCORE_MAP[score] || 'fair';
+  const ratingName = res.rating_name || (state.ratingColors[ratingKey] ? state.ratingColors[ratingKey].name : 'Tạm');
+
+  if (scoreStars) scoreStars.textContent = `⭐ ${score}đ`;
+  if (scoreLabel) scoreLabel.textContent = ratingName;
+  if (scoreBadge) {
+    scoreBadge.className = `ai-suggested-score-badge ${ratingKey}`;
+  }
+
+  if (highlightsText) highlightsText.textContent = res.highlights || '(Không có)';
+  if (concernsText) concernsText.textContent = res.concerns || '(Không có)';
+  if (commentBox) commentBox.textContent = res.suggested_comment || '';
+
+  box.style.display = 'block';
+  box.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+function applyAiSuggestion() {
+  if (!currentAiSuggestion) return;
+
+  const score = parseInt(currentAiSuggestion.suggested_score);
+  const ratingKey = currentAiSuggestion.rating_key || SCORE_MAP[score];
+  const comment = currentAiSuggestion.suggested_comment;
+
+  if (score && SCORE_MAP[score]) {
+    state.currentScore = score;
+    state.currentRating = ratingKey;
+    updateRatingButtons();
+  }
+
+  const textarea = $('#comment-input');
+  if (textarea && comment) {
+    if (textarea.value.trim() && textarea.value.trim() !== comment.trim()) {
+      textarea.value = `${textarea.value.trim()}\n\n[Gợi ý AI]: ${comment.trim()}`;
+    } else {
+      textarea.value = comment.trim();
+    }
+    textarea.focus();
+  }
+
+  showToast(`✅ Đã áp dụng: ${score}đ - ${currentAiSuggestion.rating_name || ''}!`, 'success');
+
+  const box = $('#ai-result-box');
+  if (box) box.style.display = 'none';
+}
+
 // ---- Event Listeners ----
 function initEventListeners() {
   // Export Excel buttons
@@ -1261,6 +1900,113 @@ function initEventListeners() {
 
   const setupExportBtn = $('#setup-export-btn');
   if (setupExportBtn) setupExportBtn.addEventListener('click', exportReviewerEvaluationsAsTxt);
+
+  // Gemini API Key Modal listeners
+  const setupGeminiKeyBtn = $('#setup-gemini-key-btn');
+  if (setupGeminiKeyBtn) setupGeminiKeyBtn.addEventListener('click', openGeminiKeyModal);
+
+  const aiKeyConfigBtn = $('#ai-key-config-btn');
+  if (aiKeyConfigBtn) aiKeyConfigBtn.addEventListener('click', openGeminiKeyModal);
+
+  const closeGeminiModalBtn = $('#close-gemini-modal-btn');
+  if (closeGeminiModalBtn) closeGeminiModalBtn.addEventListener('click', closeGeminiKeyModal);
+
+  const testGeminiKeyBtn = $('#test-gemini-key-btn');
+  if (testGeminiKeyBtn) testGeminiKeyBtn.addEventListener('click', testGeminiApiKey);
+
+  const saveGeminiKeyBtn = $('#save-gemini-key-btn');
+  if (saveGeminiKeyBtn) {
+    saveGeminiKeyBtn.addEventListener('click', () => {
+      const input = $('#gemini-api-key-input');
+      const key = (input ? input.value : '').trim();
+      if (!key) {
+        showToast('Vui lòng nhập API Key!', 'error');
+        return;
+      }
+      saveGeminiApiKey(state.selectedReviewer, key);
+      const chosenModel = getActiveGeminiModel();
+      saveSelectedGeminiModel(chosenModel);
+      closeGeminiKeyModal();
+      showToast(`💾 Đã lưu Gemini API Key & mô hình (${chosenModel}) thành công!`, 'success');
+    });
+  }
+
+  // Model selection and custom model input handlers
+  const geminiModelSelect = $('#gemini-model-select');
+  if (geminiModelSelect) {
+    geminiModelSelect.addEventListener('change', () => {
+      const customInput = $('#gemini-custom-model-input');
+      if (geminiModelSelect.value === 'custom') {
+        if (customInput) {
+          customInput.style.display = 'block';
+          customInput.focus();
+        }
+      } else {
+        if (customInput) customInput.style.display = 'none';
+        saveSelectedGeminiModel(geminiModelSelect.value);
+      }
+    });
+  }
+
+  const customModelInput = $('#gemini-custom-model-input');
+  if (customModelInput) {
+    customModelInput.addEventListener('input', () => {
+      if (geminiModelSelect?.value === 'custom' && customModelInput.value.trim()) {
+        saveSelectedGeminiModel(customModelInput.value.trim());
+      }
+    });
+  }
+
+  const fetchGeminiModelsBtn = $('#fetch-gemini-models-btn');
+  if (fetchGeminiModelsBtn) {
+    fetchGeminiModelsBtn.addEventListener('click', fetchGeminiModels);
+  }
+
+  const deleteGeminiKeyBtn = $('#delete-gemini-key-btn');
+  if (deleteGeminiKeyBtn) {
+    deleteGeminiKeyBtn.addEventListener('click', () => {
+      if (confirm('Bạn có chắc chắn muốn xóa API Key này không?')) {
+        removeGeminiApiKey(state.selectedReviewer);
+        closeGeminiKeyModal();
+        showToast('🗑️ Đã xóa Gemini API Key!', 'info');
+      }
+    });
+  }
+
+  const toggleVisibilityBtn = $('#toggle-key-visibility-btn');
+  if (toggleVisibilityBtn) {
+    toggleVisibilityBtn.addEventListener('click', () => {
+      const input = $('#gemini-api-key-input');
+      if (input) {
+        input.type = input.type === 'password' ? 'text' : 'password';
+      }
+    });
+  }
+
+  // AI Suggestion Buttons
+  const aiSuggestBtn = $('#ai-suggest-btn');
+  if (aiSuggestBtn) aiSuggestBtn.addEventListener('click', requestAiSuggestion);
+
+  const aiApplyBtn = $('#ai-apply-btn');
+  if (aiApplyBtn) aiApplyBtn.addEventListener('click', applyAiSuggestion);
+
+  const aiCopyBtn = $('#ai-copy-btn');
+  if (aiCopyBtn) {
+    aiCopyBtn.addEventListener('click', () => {
+      if (currentAiSuggestion && currentAiSuggestion.suggested_comment) {
+        navigator.clipboard.writeText(currentAiSuggestion.suggested_comment);
+        showToast('📋 Đã sao chép nhận xét của AI vào bộ nhớ tạm!', 'success');
+      }
+    });
+  }
+
+  const aiDismissBtn = $('#ai-dismiss-btn');
+  if (aiDismissBtn) {
+    aiDismissBtn.addEventListener('click', () => {
+      const box = $('#ai-result-box');
+      if (box) box.style.display = 'none';
+    });
+  }
 
   // Force sync button
   const forceSyncBtn = $('#force-sync-btn');

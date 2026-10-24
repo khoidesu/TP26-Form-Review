@@ -275,7 +275,7 @@ async function fetchFromGoogleSheet(force = false) {
       rowIndex: r + 1, // 1-indexed row for Excel & Sheets
       id: id,
       data: formData,
-      ban: formData[9] || '',
+      ban: (formData[9] || '').trim(),
       evaluations: evaluations
     });
   }
