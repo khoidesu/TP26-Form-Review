@@ -972,18 +972,8 @@ app.get('/api/export-summary-excel', async (req, res) => {
   }
 });
 
-// Periodic background sync from Google Sheet every 25 seconds
-setInterval(async () => {
-  try {
-    const updated = await googleSheetsService.fetchFromGoogleSheet(true);
-    // Broadcast sync event to all connected clients
-    if (clients.size > 0) {
-      broadcast({ type: 'DATA_REFRESHED', lastSynced: updated.lastSynced });
-    }
-  } catch (err) {
-    // Silent background error
-  }
-}, 25000);
+// Note: Background polling interval removed to prevent automatic reloads and screen interrupts.
+// Sync to Google Sheet happens explicitly when users save evaluations or click sync.
 
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {

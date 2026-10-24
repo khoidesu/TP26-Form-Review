@@ -316,14 +316,17 @@ async function loadData() {
       state.filteredForms = [...state.forms];
     }
 
-    // Refresh UI components if active
+    // Refresh UI components if active without resetting current evaluation inputs
     if ($('#eval-screen')?.classList.contains('active')) {
       buildSidebar();
       updateProgress();
       if (state.currentIndex >= state.filteredForms.length) {
         state.currentIndex = Math.max(0, state.filteredForms.length - 1);
       }
-      renderCurrentForm();
+      const currentForm = state.filteredForms[state.currentIndex];
+      if (currentForm) {
+        renderOtherEvals(currentForm);
+      }
     }
 
     if ($('#summary-screen')?.classList.contains('active')) {
@@ -518,7 +521,7 @@ function initSetupScreen() {
   const banBtns = $$('.ban-btn');
   const startBtn = $('#start-btn');
 
-    reviewerSelect.addEventListener('change', () => {
+  reviewerSelect.addEventListener('change', () => {
     const col = parseInt(reviewerSelect.value);
     if (col) {
       const reviewer = state.reviewers.find(r => r.colIndex === col);
@@ -767,9 +770,9 @@ function buildSidebar(searchFilter = '') {
 
     if (q) {
       const match = candidateName.toLowerCase().includes(q) ||
-                    mssv.toLowerCase().includes(q) ||
-                    idStr === q ||
-                    `#${idStr}` === q;
+        mssv.toLowerCase().includes(q) ||
+        idStr === q ||
+        `#${idStr}` === q;
       if (!match) return;
     }
 
@@ -1356,10 +1359,10 @@ function updateGeminiKeyStatusUi() {
 
 function isGeminiModelUnavailable(err) {
   const msg = (err?.message || '').toLowerCase();
-  return msg.includes('is not found') || 
-         msg.includes('no longer available') || 
-         msg.includes('not supported') ||
-         msg.includes('not found for api version');
+  return msg.includes('is not found') ||
+    msg.includes('no longer available') ||
+    msg.includes('not supported') ||
+    msg.includes('not found for api version');
 }
 
 function openGeminiKeyModal() {
@@ -1601,7 +1604,7 @@ async function testGeminiApiKey() {
 
 function buildGeminiSystemPrompt() {
   return `Bạn là Trợ lý Ban Giám Khảo AI cao cấp trong chiến dịch tuyển chọn nhân tài "TRAINEE PROGRAM 2026 — SIGNAL FROM THE DEEP OCEAN".
-Nhiệm vụ của bạn là đọc kỹ hồ sơ đơn ứng tuyển, phân tích câu trả lời chuyên môn, động lực, kỹ năng và thái độ của ứng viên để đưa ra GỢI Ý ĐIỂM SỐ (1 đến 5 điểm) cùng NHẬN XÉT ĐÁNH GIÁ CÔNG TÂM, SÂU SẮC, GIÚP GIÁM KHẢO TIẾT KIỆM THỜI GIAN NHƯNG VẪN ĐẢM BẢO CHẤT LƯỢNG.
+Nhiệm vụ của bạn là đọc kỹ hồ sơ đơn ứng tuyển, phân tích câu trả lời chuyên môn, động lực, kỹ năng và thái độ của ứng viên để đưa ra GỢI Ý ĐIỂM SỐ (1 đến 5 điểm, đảm bảo công tâm và không thiên vị, chỉ đề xuất 1 điểm khi thật sự không đạt yêu cầu, nhưng phải chắc chắn chấm đúng, không nhân nhượng, mạnh tay dù là 1 hay 5 điểm, phải thật sự phản ánh đúng với bài làm của ứng viên) cùng NHẬN XÉT ĐÁNH GIÁ CÔNG TÂM, SÂU SẮC, GIÚP GIÁM KHẢO TIẾT KIỆM THỜI GIAN NHƯNG VẪN ĐẢM BẢO CHẤT LƯỢNG.
 
 ---
 🎯 TIÊU CHÍ & THANG ĐIỂM ĐÁNH GIÁ (1 - 5):
@@ -2164,7 +2167,14 @@ function initEventListeners() {
   document.addEventListener('keydown', (e) => {
     if (!$('#eval-screen').classList.contains('active')) return;
 
-    // Don't trigger if typing in textarea/input
+    // Ctrl+S or Cmd+S to save immediately anytime, even when typing in textarea
+    if (e.key === 's' && (e.ctrlKey || e.metaKey)) {
+      e.preventDefault();
+      saveEvaluation(false);
+      return;
+    }
+
+    // Don't trigger navigation / score keys if typing in textarea or input
     if (e.target.tagName === 'TEXTAREA' || e.target.tagName === 'INPUT') return;
 
     if (e.key === 'ArrowLeft' || e.key === 'a') {
@@ -2179,9 +2189,6 @@ function initEventListeners() {
         renderCurrentForm();
         updateSidebarActive();
       }
-    } else if (e.key === 's' && (e.ctrlKey || e.metaKey)) {
-      e.preventDefault();
-      saveEvaluation(false);
     } else if (e.key >= '1' && e.key <= '5') {
       // Shortcut keys 1-5 for rating!
       const scoreNum = parseInt(e.key);
@@ -2204,20 +2211,8 @@ function initEventListeners() {
     }
   });
 
-  // Fallback background polling every 12 seconds
-  setInterval(async () => {
-    if (!state.wsConnected) {
-      try {
-        await loadData();
-        if ($('#eval-screen').classList.contains('active')) {
-          const currentForm = state.filteredForms[state.currentIndex];
-          if (currentForm) renderOtherEvals(currentForm);
-        } else if ($('#summary-screen').classList.contains('active')) {
-          renderSummaryView();
-        }
-      } catch (e) { }
-    }
-  }, 12000);
+  // Note: Background polling interval removed to prevent automatic screen reloads.
+  // Evaluations are synced to Google Sheet explicitly upon saving or clicking sync.
 }
 
 // ============================================================
