@@ -3,7 +3,16 @@
 // Application Logic with Google Sheets & Real-time WebSocket Sync
 // ============================================================
 
-const API_BASE = '';
+// ============================================================
+// Render Backend URL (Hosts Express API + WebSocket + GG Sheets)
+// ============================================================
+const BACKEND_URL = 'https://tp26-form-review.onrender.com';
+
+// If running locally, use relative path (same origin).
+// If running on Vercel or any other host, use Render backend URL.
+const API_BASE = (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
+  ? ''
+  : BACKEND_URL;
 
 const SCORE_MAP = {
   5: 'excellent',
@@ -30,7 +39,7 @@ const state = {
   heThongCols: [],
   ttskCols: [],
   ratingColors: {},
-  
+
   selectedReviewer: null,
   selectedReviewerCol: null,
   selectedBan: null,
@@ -152,9 +161,17 @@ function updateSyncStatus(status, text) {
 let ws = null;
 let wsReconnectTimer = null;
 
+function getWebSocketUrl() {
+  if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    return `${protocol}//${window.location.host}`;
+  }
+  // Connect to Render backend WebSocket server (wss://)
+  return BACKEND_URL.replace(/^http/, 'ws');
+}
+
 function initWebSocket() {
-  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  const wsUrl = `${protocol}//${window.location.host}`;
+  const wsUrl = getWebSocketUrl();
 
   try {
     ws = new WebSocket(wsUrl);
@@ -257,20 +274,22 @@ function handleWebSocketMessage(msg) {
 
 // ---- Data Loading ----
 async function loadData() {
+  updateSyncStatus('offline', 'Đang kết nối server...');
   try {
     const res = await fetch(`${API_BASE}/api/data`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
-    
+
     state.forms = data.forms;
     state.reviewers = data.reviewers;
     state.columnMap = data.columnMap;
     state.heThongCols = data.heThongCols;
     state.ttskCols = data.ttskCols;
     state.ratingColors = data.ratingColors;
-    
+
     // Populate reviewer select
     populateReviewers();
-    
+
     // Count by ban
     const htCount = data.forms.filter(f => f.ban === 'Hệ thống').length;
     const ttskCount = data.forms.filter(f => f.ban === 'Truyền thông - Sự kiện').length;
@@ -299,7 +318,7 @@ async function loadData() {
     }
 
     updateSyncStatus('online', 'GG Sheet: Đồng bộ');
-    
+
   } catch (err) {
     console.error('Failed to load data:', err);
     updateSyncStatus('offline', 'Lỗi tải GG Sheet');
@@ -310,7 +329,7 @@ async function loadData() {
 function populateReviewers() {
   const select = $('#reviewer-select');
   select.innerHTML = '<option value="">-- Chọn người chấm --</option>';
-  
+
   state.reviewers.forEach(r => {
     const option = document.createElement('option');
     option.value = r.colIndex;
@@ -484,7 +503,7 @@ function initSetupScreen() {
   const addReviewerBtn = $('#add-reviewer-btn');
   const banBtns = $$('.ban-btn');
   const startBtn = $('#start-btn');
-  
+
   reviewerSelect.addEventListener('change', () => {
     const col = parseInt(reviewerSelect.value);
     if (col) {
@@ -511,21 +530,21 @@ function initSetupScreen() {
   if (manageReviewersBtn) {
     manageReviewersBtn.addEventListener('click', openManageReviewersModal);
   }
-  
+
   addReviewerBtn.addEventListener('click', async () => {
     const name = newReviewerInput.value.trim();
     if (!name) return;
-    
+
     try {
       addReviewerBtn.disabled = true;
       addReviewerBtn.innerHTML = '<div class="loading-spinner"></div>';
-      
+
       const res = await fetch(`${API_BASE}/api/add-reviewer`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name })
       });
-      
+
       const data = await res.json();
       if (data.success) {
         const actualName = data.name || name;
@@ -536,11 +555,11 @@ function initSetupScreen() {
         });
         state.selectedReviewer = actualName;
         state.selectedReviewerCol = data.colIndex;
-        
+
         populateReviewers();
         reviewerSelect.value = data.colIndex;
         newReviewerInput.value = '';
-        
+
         showToast(`Đã thêm người chấm vào Google Sheet: ${actualName}`, 'success');
         checkStartReady();
       } else {
@@ -560,7 +579,7 @@ function initSetupScreen() {
       addReviewerBtn.click();
     }
   });
-  
+
   banBtns.forEach(btn => {
     btn.addEventListener('click', () => {
       banBtns.forEach(b => b.classList.remove('active'));
@@ -569,7 +588,7 @@ function initSetupScreen() {
       checkStartReady();
     });
   });
-  
+
   startBtn.addEventListener('click', () => {
     if (state.selectedReviewer && state.selectedBan) {
       startEvaluation();
@@ -684,15 +703,15 @@ function startEvaluation() {
   } else {
     state.filteredForms = state.forms.filter(f => f.ban === 'Truyền thông - Sự kiện');
   }
-  
+
   state.currentIndex = 0;
-  
+
   $('#setup-screen').classList.remove('active');
   $('#eval-screen').classList.add('active');
-  
+
   $('#current-reviewer').textContent = `👤 ${state.selectedReviewer}`;
   $('#current-ban').textContent = state.selectedBan === 'he-thong' ? '⚙️ Hệ thống' : '📢 Truyền thông - Sự kiện';
-  
+
   buildSidebar();
   renderCurrentForm();
 }
@@ -701,31 +720,31 @@ function buildSidebar() {
   const list = $('#sidebar-list');
   if (!list) return;
   list.innerHTML = '';
-  
+
   state.filteredForms.forEach((form, idx) => {
     const item = document.createElement('div');
     item.className = `sidebar-item ${idx === state.currentIndex ? 'active' : ''}`;
-    
+
     const eval_ = form.evaluations && form.evaluations[state.selectedReviewer];
     const hasEval = eval_ && (eval_.comment || eval_.score || eval_.fillColor);
     if (hasEval) item.classList.add('evaluated');
-    
+
     const ratingClass = eval_ ? (eval_.ratingKey ? `rated-${eval_.ratingKey}` : getRatingClass(eval_.fillColor)) : '';
     const colorBg = eval_?.fillColor ? getColorFromArgb(eval_.fillColor) : (eval_?.ratingKey && state.ratingColors[eval_.ratingKey] ? state.ratingColors[eval_.ratingKey].color : 'var(--text-muted)');
-    
+
     item.innerHTML = `
       <span class="sidebar-item-id">#${form.id}</span>
       <span class="sidebar-item-name">${form.data[2] || 'N/A'}</span>
       ${hasEval ? `<span class="sidebar-item-status ${ratingClass}" style="background: ${colorBg}"></span>` : ''}
     `;
-    
+
     item.addEventListener('click', () => {
       state.currentIndex = idx;
       renderCurrentForm();
       updateSidebarActive();
       closeSidebar();
     });
-    
+
     list.appendChild(item);
   });
 }
@@ -739,26 +758,26 @@ function updateSidebarActive() {
 function renderCurrentForm() {
   const form = state.filteredForms[state.currentIndex];
   if (!form) return;
-  
+
   const cols = state.selectedBan === 'he-thong' ? state.heThongCols : state.ttskCols;
-  
+
   // Header
   $('#form-id').textContent = `ID: ${form.id}`;
   $('#form-name').textContent = form.data[2] || 'N/A';
   $('#form-mssv').textContent = `📋 ${form.data[3] || 'N/A'}`;
   $('#form-class').textContent = `🏫 ${form.data[5] || 'N/A'}`;
   $('#form-email').textContent = `📧 ${form.data[4] || 'N/A'}`;
-  
+
   // Content
   const contentDiv = $('#form-content');
   contentDiv.innerHTML = '';
-  
+
   const contentCols = cols.filter(c => c > 5);
-  
+
   contentCols.forEach(colIdx => {
     const label = state.columnMap[colIdx] || `Cột ${colIdx}`;
     const value = form.data[colIdx] || '';
-    
+
     const item = document.createElement('div');
     item.className = `content-item ${(!value || value === '0') ? 'empty' : ''}`;
     item.innerHTML = `
@@ -770,38 +789,38 @@ function renderCurrentForm() {
     `;
     contentDiv.appendChild(item);
   });
-  
+
   // Load existing evaluation for current reviewer
   const eval_ = form.evaluations && form.evaluations[state.selectedReviewer];
   const commentInput = $('#comment-input');
-  
+
   if (eval_ && eval_.comment) {
     commentInput.value = eval_.comment;
   } else {
     commentInput.value = '';
   }
-  
+
   // Set rating and score
   state.currentRating = eval_ ? (eval_.ratingKey || mapRatingFromColor(eval_.fillColor)) : null;
   state.currentScore = eval_ ? (eval_.score || (state.currentRating ? RATING_TO_SCORE[state.currentRating] : null)) : null;
   updateRatingButtons();
-  
+
   // Render other evaluations
   renderOtherEvals(form);
-  
+
   // Progress
   updateProgress();
-  
+
   // Navigation buttons
   $('#prev-btn').disabled = state.currentIndex === 0;
   $('#next-btn').disabled = state.currentIndex === state.filteredForms.length - 1;
-  
+
   // Clear status and validation warning
   $('#save-status').textContent = '';
   $('#save-status').className = 'save-status';
   const ratingContainer = $('#rating-buttons');
   if (ratingContainer) ratingContainer.classList.remove('rating-required-shake');
-  
+
   // Scroll to top
   window.scrollTo({ top: 0, behavior: 'smooth' });
   const splitLeft = $('#split-left');
@@ -834,12 +853,12 @@ function renderOtherEvals(form) {
   const list = $('#other-evals-list');
   if (!list) return;
   list.innerHTML = '';
-  
+
   let hasOther = false;
-  
+
   for (const reviewer of state.reviewers) {
     if (reviewer.name === state.selectedReviewer) continue;
-    
+
     const eval_ = form.evaluations && form.evaluations[reviewer.name];
     if (eval_ && (eval_.comment || eval_.score || eval_.fillColor || eval_.ratingKey)) {
       hasOther = true;
@@ -848,16 +867,16 @@ function renderOtherEvals(form) {
       const ratingClass = ratingKey ? `rated-${ratingKey}` : '';
       const ratingName = getRatingNameFromKey(ratingKey) || (score ? `${score} điểm` : 'Đã chấm');
       const colorHex = eval_.fillColor ? getColorFromArgb(eval_.fillColor) : (ratingKey && state.ratingColors[ratingKey] ? state.ratingColors[ratingKey].color : '#38bdf8');
-      
+
       const safeId = reviewer.name.replace(/[^a-zA-Z0-9_\u00C0-\u1EF9]/g, '_');
       const item = document.createElement('div');
       item.className = `other-eval-item ${ratingClass}`;
       item.id = `other-eval-${safeId}`;
 
-      const commentHtml = eval_.comment 
-        ? formatValue(eval_.comment) 
+      const commentHtml = eval_.comment
+        ? formatValue(eval_.comment)
         : '<span class="eval-no-comment">(Đã chấm điểm, không có nhận xét chữ)</span>';
-      
+
       item.innerHTML = `
         <div class="eval-item-header">
           <div class="eval-reviewer-info">
@@ -873,7 +892,7 @@ function renderOtherEvals(form) {
       list.appendChild(item);
     }
   }
-  
+
   if (!hasOther) {
     list.innerHTML = '<p class="no-evals">Chưa có đánh giá nào từ các giám khảo khác cho form này.</p>';
   }
@@ -882,12 +901,12 @@ function renderOtherEvals(form) {
 function updateProgress() {
   const total = state.filteredForms.length;
   const current = state.currentIndex + 1;
-  
+
   const evaluated = state.filteredForms.filter(f => {
     const eval_ = f.evaluations && f.evaluations[state.selectedReviewer];
     return eval_ && (eval_.comment || eval_.score || eval_.fillColor);
   }).length;
-  
+
   $('#progress-text').textContent = `${current}/${total} (đã chấm: ${evaluated})`;
   $('#progress-fill').style.width = `${(current / total) * 100}%`;
 }
@@ -919,10 +938,10 @@ async function saveEvaluation(goNext = false) {
     showToast('⚠️ Vui lòng chọn điểm đánh giá (1 - 5 điểm) trước khi lưu bài!', 'error');
     return false;
   }
-  
+
   statusEl.className = 'save-status loading';
   statusEl.textContent = '⏳ Đang lưu vào Google Sheet...';
-  
+
   try {
     const res = await fetch(`${API_BASE}/api/evaluate`, {
       method: 'POST',
@@ -936,14 +955,14 @@ async function saveEvaluation(goNext = false) {
         score: score
       })
     });
-    
+
     const data = await res.json();
-    
+
     if (data.success) {
       statusEl.className = 'save-status success';
       statusEl.textContent = '✅ Đã lưu Google Sheet thành công!';
       showToast('Đã lưu đánh giá & điểm vào Google Sheet!', 'success');
-      
+
       // Update local state
       if (!form.evaluations) form.evaluations = {};
       if (!form.evaluations[state.selectedReviewer]) {
@@ -953,10 +972,10 @@ async function saveEvaluation(goNext = false) {
       form.evaluations[state.selectedReviewer].ratingKey = data.ratingKey || rating;
       form.evaluations[state.selectedReviewer].score = data.score !== undefined ? data.score : score;
       form.evaluations[state.selectedReviewer].fillColor = data.fillColor || (rating && state.ratingColors[rating] ? state.ratingColors[rating].hex : null);
-      
+
       buildSidebar();
       updateProgress();
-      
+
       if (goNext && state.currentIndex < state.filteredForms.length - 1) {
         setTimeout(() => {
           state.currentIndex++;
@@ -1066,7 +1085,7 @@ function exportReviewerEvaluationsAsTxt() {
 
   const safeReviewerName = reviewerName.replace(/[^a-zA-Z0-9_\u00C0-\u1EF9]/g, '_');
   const pad = n => n.toString().padStart(2, '0');
-  const timestamp = `${now.getFullYear()}${pad(now.getMonth()+1)}${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}`;
+  const timestamp = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}`;
   const filename = `Danh_gia_${safeReviewerName}_${timestamp}.txt`;
 
   downloadTxtFile(filename, content);
@@ -1098,7 +1117,7 @@ async function exportReviewerEvaluationsAsExcel() {
   showToast('⏳ Đang tạo file Excel (cột Nhận xét & cột Điểm)...', 'info');
 
   const reviewerName = state.selectedReviewer;
-  const url = `/api/export-excel?reviewer=${encodeURIComponent(reviewerName)}`;
+  const url = `${API_BASE}/api/export-excel?reviewer=${encodeURIComponent(reviewerName)}`;
 
   try {
     const res = await fetch(url);
@@ -1189,11 +1208,11 @@ function initEventListeners() {
       updateRatingButtons();
     });
   });
-  
+
   // Save buttons
   $('#save-btn').addEventListener('click', () => saveEvaluation(false));
   $('#save-next-btn').addEventListener('click', () => saveEvaluation(true));
-  
+
   // Navigation
   $('#prev-btn').addEventListener('click', () => {
     if (state.currentIndex > 0) {
@@ -1202,7 +1221,7 @@ function initEventListeners() {
       updateSidebarActive();
     }
   });
-  
+
   $('#next-btn').addEventListener('click', () => {
     if (state.currentIndex < state.filteredForms.length - 1) {
       state.currentIndex++;
@@ -1210,14 +1229,14 @@ function initEventListeners() {
       updateSidebarActive();
     }
   });
-  
+
   // Back button
   $('#back-btn').addEventListener('click', () => {
     $('#eval-screen').classList.remove('active');
     $('#setup-screen').classList.add('active');
     closeSidebar();
   });
-  
+
   // Sidebar
   $('#open-sidebar').addEventListener('click', openSidebar);
   $('#toggle-sidebar').addEventListener('click', closeSidebar);
@@ -1286,14 +1305,14 @@ function initEventListeners() {
   if (cdJumpEvalBtn) {
     cdJumpEvalBtn.addEventListener('click', () => jumpToEvaluateCandidate(state.activeCandidateId));
   }
-  
+
   // Keyboard shortcuts
   document.addEventListener('keydown', (e) => {
     if (!$('#eval-screen').classList.contains('active')) return;
-    
+
     // Don't trigger if typing in textarea/input
     if (e.target.tagName === 'TEXTAREA' || e.target.tagName === 'INPUT') return;
-    
+
     if (e.key === 'ArrowLeft' || e.key === 'a') {
       if (state.currentIndex > 0) {
         state.currentIndex--;
@@ -1342,7 +1361,7 @@ function initEventListeners() {
         } else if ($('#summary-screen').classList.contains('active')) {
           renderSummaryView();
         }
-      } catch (e) {}
+      } catch (e) { }
     }
   }, 12000);
 }
