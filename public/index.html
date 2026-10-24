@@ -265,19 +265,26 @@
       <!-- Sidebar - Form list -->
       <aside class="sidebar glass-card" id="sidebar">
         <div class="sidebar-header">
-          <h3>📋 Danh sách form</h3>
+          <div>
+            <h3>📋 Danh sách form</h3>
+            <span class="sidebar-subtitle" id="sidebar-subtitle">0 form</span>
+          </div>
           <div style="display: flex; gap: 6px; align-items: center;">
             <button id="sidebar-export-excel-btn" class="btn btn-excel btn-sm"
               title="Xuất file Excel 1 cột cả Hệ thống & TT-SK">📊 Excel</button>
             <button id="sidebar-export-txt-btn" class="btn btn-export btn-sm" title="Tải về file TXT">📥 TXT</button>
-            <button id="toggle-sidebar" class="btn btn-ghost btn-sm">✕</button>
+            <button id="toggle-sidebar" class="btn btn-ghost btn-sm" title="Đóng danh sách">✕</button>
           </div>
+        </div>
+        <div class="sidebar-search-box">
+          <input type="text" id="sidebar-search-input" placeholder="🔍 Tìm nhanh tên, MSSV, ID...">
         </div>
         <div class="sidebar-list" id="sidebar-list">
           <!-- Dynamically rendered -->
         </div>
       </aside>
-      <button id="open-sidebar" class="btn btn-float" title="Mở danh sách">📋</button>
+      <div class="sidebar-overlay" id="sidebar-overlay"></div>
+      <button id="open-sidebar" class="btn btn-float" title="Mở danh sách form (Đổi nhanh form)">📋</button>
     </div>
 
     <!-- 3. Summary / Leaderboard Screen -->

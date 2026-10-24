@@ -55,9 +55,20 @@ const state = {
   activeCandidateId: null,
 };
 
-// ---- Utility Functions ----
 function $(sel) { return document.querySelector(sel); }
 function $$(sel) { return document.querySelectorAll(sel); }
+
+function isHeThong(form) {
+  if (!form) return false;
+  const b = ((typeof form === 'string' ? form : (form.ban || form.data?.[9])) || '').toLowerCase().trim();
+  return b.includes('hệ thống') || b.includes('he thong');
+}
+
+function isTTSK(form) {
+  if (!form) return false;
+  const b = ((typeof form === 'string' ? form : (form.ban || form.data?.[9])) || '').toLowerCase().trim();
+  return b.includes('truyền thông') || b.includes('truyen thong') || b.includes('ttsk') || b.includes('tt-sk') || b.includes('sự kiện') || b.includes('su kien');
+}
 
 function showToast(message, type = 'info') {
   const container = $('#toast-container');
@@ -291,16 +302,16 @@ async function loadData() {
     populateReviewers();
 
     // Count by ban
-    const htCount = data.forms.filter(f => f.ban === 'Hệ thống').length;
-    const ttskCount = data.forms.filter(f => f.ban === 'Truyền thông - Sự kiện').length;
+    const htCount = data.forms.filter(isHeThong).length;
+    const ttskCount = data.forms.filter(isTTSK).length;
     $('#count-ht').textContent = `${htCount} form`;
     $('#count-ttsk').textContent = `${ttskCount} form`;
 
     // Recompute filtered forms based on active ban
     if (state.selectedBan === 'he-thong') {
-      state.filteredForms = state.forms.filter(f => f.ban === 'Hệ thống');
-    } else if (state.selectedBan === 'tt-sk') {
-      state.filteredForms = state.forms.filter(f => f.ban === 'Truyền thông - Sự kiện');
+      state.filteredForms = state.forms.filter(isHeThong);
+    } else if (state.selectedBan === 'ttsk' || state.selectedBan === 'tt-sk') {
+      state.filteredForms = state.forms.filter(isTTSK);
     } else {
       state.filteredForms = [...state.forms];
     }
@@ -309,8 +320,10 @@ async function loadData() {
     if ($('#eval-screen')?.classList.contains('active')) {
       buildSidebar();
       updateProgress();
-      const currentForm = state.filteredForms[state.currentIndex];
-      if (currentForm) renderOtherEvals(currentForm);
+      if (state.currentIndex >= state.filteredForms.length) {
+        state.currentIndex = Math.max(0, state.filteredForms.length - 1);
+      }
+      renderCurrentForm();
     }
 
     if ($('#summary-screen')?.classList.contains('active')) {
@@ -638,6 +651,12 @@ function initSetupScreen() {
 
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
+      const sidebar = $('#sidebar');
+      if (sidebar && sidebar.classList.contains('open')) {
+        closeSidebar();
+        return;
+      }
+
       const delModal = $('#delete-confirm-modal');
       const mgModal = $('#manage-reviewers-modal');
       const gdModal = $('#guide-modal');
@@ -699,9 +718,11 @@ function checkStartReady() {
 // ---- Evaluation Screen Logic ----
 function startEvaluation() {
   if (state.selectedBan === 'he-thong') {
-    state.filteredForms = state.forms.filter(f => f.ban === 'Hệ thống');
+    state.filteredForms = state.forms.filter(isHeThong);
+  } else if (state.selectedBan === 'ttsk' || state.selectedBan === 'tt-sk') {
+    state.filteredForms = state.forms.filter(isTTSK);
   } else {
-    state.filteredForms = state.forms.filter(f => f.ban === 'Truyền thông - Sự kiện');
+    state.filteredForms = [...state.forms];
   }
 
   state.currentIndex = 0;
@@ -716,12 +737,46 @@ function startEvaluation() {
   renderCurrentForm();
 }
 
-function buildSidebar() {
+function buildSidebar(searchFilter = '') {
   const list = $('#sidebar-list');
   if (!list) return;
   list.innerHTML = '';
 
+  const banName = state.selectedBan === 'he-thong' ? '⚙️ Hệ thống' : '📢 Truyền thông - Sự kiện';
+  const subtitle = $('#sidebar-subtitle');
+  if (subtitle) {
+    subtitle.textContent = `${banName} • ${state.filteredForms.length} form`;
+  }
+
+  const q = (searchFilter || '').trim().toLowerCase();
+
+  const matchingForms = [];
   state.filteredForms.forEach((form, idx) => {
+    const candidateName = (form.data[2] || '').trim();
+    const mssv = (form.data[3] || '').trim();
+    const idStr = String(form.id);
+
+    if (q) {
+      const match = candidateName.toLowerCase().includes(q) ||
+                    mssv.toLowerCase().includes(q) ||
+                    idStr === q ||
+                    `#${idStr}` === q;
+      if (!match) return;
+    }
+
+    matchingForms.push({ form, idx });
+  });
+
+  if (matchingForms.length === 0) {
+    list.innerHTML = `
+      <div style="text-align: center; color: var(--text-muted); padding: 30px 10px; font-size: 13px;">
+        Không tìm thấy form nào khớp với "${q}".
+      </div>
+    `;
+    return;
+  }
+
+  matchingForms.forEach(({ form, idx }) => {
     const item = document.createElement('div');
     item.className = `sidebar-item ${idx === state.currentIndex ? 'active' : ''}`;
 
@@ -729,13 +784,26 @@ function buildSidebar() {
     const hasEval = eval_ && (eval_.comment || eval_.score || eval_.fillColor);
     if (hasEval) item.classList.add('evaluated');
 
-    const ratingClass = eval_ ? (eval_.ratingKey ? `rated-${eval_.ratingKey}` : getRatingClass(eval_.fillColor)) : '';
-    const colorBg = eval_?.fillColor ? getColorFromArgb(eval_.fillColor) : (eval_?.ratingKey && state.ratingColors[eval_.ratingKey] ? state.ratingColors[eval_.ratingKey].color : 'var(--text-muted)');
+    const score = eval_?.score;
+    const ratingKey = eval_?.ratingKey;
+    const colorBg = eval_?.fillColor ? getColorFromArgb(eval_.fillColor) : (ratingKey && state.ratingColors[ratingKey] ? state.ratingColors[ratingKey].color : null);
+
+    let statusHtml = '';
+    if (score) {
+      statusHtml = `<span class="sidebar-item-score-badge" style="background: ${colorBg || '#3b82f6'}">${score}đ</span>`;
+    } else if (hasEval) {
+      statusHtml = `<span class="sidebar-item-status" style="background: ${colorBg || '#10b981'}" title="Đã có nhận xét"></span>`;
+    } else {
+      statusHtml = `<span style="font-size: 11px; color: var(--text-muted);">Chưa chấm</span>`;
+    }
 
     item.innerHTML = `
       <span class="sidebar-item-id">#${form.id}</span>
-      <span class="sidebar-item-name">${form.data[2] || 'N/A'}</span>
-      ${hasEval ? `<span class="sidebar-item-status ${ratingClass}" style="background: ${colorBg}"></span>` : ''}
+      <div class="sidebar-item-info">
+        <div class="sidebar-item-name">${form.data[2] || 'N/A'}</div>
+        <div class="sidebar-item-meta">${form.data[3] || 'N/A'} • ${form.data[5] || 'N/A'}</div>
+      </div>
+      ${statusHtml}
     `;
 
     item.addEventListener('click', () => {
@@ -759,7 +827,9 @@ function renderCurrentForm() {
   const form = state.filteredForms[state.currentIndex];
   if (!form) return;
 
-  const cols = state.selectedBan === 'he-thong' ? state.heThongCols : state.ttskCols;
+  const isFormTTSK = isTTSK(form);
+  const isHT = (state.selectedBan === 'he-thong') || (!isFormTTSK && isHeThong(form));
+  const cols = isHT ? state.heThongCols : state.ttskCols;
 
   // Header
   $('#form-id').textContent = `ID: ${form.id}`;
@@ -995,20 +1065,46 @@ async function saveEvaluation(goNext = false) {
 
 // ---- Sidebar Toggle ----
 function openSidebar() {
-  $('#sidebar').classList.add('open');
-  let overlay = $('.sidebar-overlay');
+  const sidebar = $('#sidebar');
+  if (!sidebar) return;
+  sidebar.classList.add('open');
+
+  let overlay = $('#sidebar-overlay');
   if (!overlay) {
     overlay = document.createElement('div');
+    overlay.id = 'sidebar-overlay';
     overlay.className = 'sidebar-overlay';
     overlay.addEventListener('click', closeSidebar);
-    document.body.appendChild(overlay);
+    $('#eval-screen').appendChild(overlay);
+  } else {
+    overlay.addEventListener('click', closeSidebar);
   }
-  setTimeout(() => overlay.classList.add('active'), 10);
+
+  // Remove any legacy overlays on body
+  document.querySelectorAll('body > .sidebar-overlay').forEach(el => el.remove());
+
+  overlay.classList.add('active');
+
+  // Re-build sidebar with cleared filter
+  const searchInput = $('#sidebar-search-input');
+  if (searchInput) {
+    searchInput.value = '';
+  }
+  buildSidebar();
+
+  // Scroll active item into view
+  setTimeout(() => {
+    const activeItem = sidebar.querySelector('.sidebar-item.active');
+    if (activeItem) {
+      activeItem.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    }
+  }, 60);
 }
 
 function closeSidebar() {
-  $('#sidebar').classList.remove('open');
-  const overlay = $('.sidebar-overlay');
+  const sidebar = $('#sidebar');
+  if (sidebar) sidebar.classList.remove('open');
+  const overlay = $('#sidebar-overlay') || $('.sidebar-overlay');
   if (overlay) {
     overlay.classList.remove('active');
   }
@@ -1241,6 +1337,18 @@ function initEventListeners() {
   $('#open-sidebar').addEventListener('click', openSidebar);
   $('#toggle-sidebar').addEventListener('click', closeSidebar);
 
+  const sidebarOverlay = $('#sidebar-overlay');
+  if (sidebarOverlay) {
+    sidebarOverlay.addEventListener('click', closeSidebar);
+  }
+
+  const sidebarSearchInput = $('#sidebar-search-input');
+  if (sidebarSearchInput) {
+    sidebarSearchInput.addEventListener('input', (e) => {
+      buildSidebar(e.target.value);
+    });
+  }
+
   // Summary Screen Navigation buttons
   const openSummaryBtn = $('#open-summary-btn');
   if (openSummaryBtn) {
@@ -1411,9 +1519,9 @@ function renderSummaryView() {
   // Filter by ban
   let list = processedForms;
   if (state.summaryBanFilter === 'he-thong') {
-    list = list.filter(item => item.form.ban === 'Hệ thống');
-  } else if (state.summaryBanFilter === 'ttsk') {
-    list = list.filter(item => item.form.ban === 'Truyền thông - Sự kiện');
+    list = list.filter(item => isHeThong(item.form));
+  } else if (state.summaryBanFilter === 'ttsk' || state.summaryBanFilter === 'tt-sk') {
+    list = list.filter(item => isTTSK(item.form));
   }
 
   // Filter by search query
@@ -1468,8 +1576,8 @@ function renderSummaryView() {
   if ($('#stat-avg-score')) $('#stat-avg-score').textContent = `${overallAvg} ★`;
 
   // Update count pills
-  const htCount = state.forms.filter(f => f.ban === 'Hệ thống').length;
-  const ttskCount = state.forms.filter(f => f.ban === 'Truyền thông - Sự kiện').length;
+  const htCount = state.forms.filter(isHeThong).length;
+  const ttskCount = state.forms.filter(isTTSK).length;
   if ($('#filter-all-count')) $('#filter-all-count').textContent = totalCandidates;
   if ($('#filter-ht-count')) $('#filter-ht-count').textContent = htCount;
   if ($('#filter-ttsk-count')) $('#filter-ttsk-count').textContent = ttskCount;
@@ -1498,8 +1606,9 @@ function renderSummaryView() {
       else if (rank === 3 && item.totalScore > 0) rankBadge = `<span class="rank-badge rank-3" title="Top 3">🥉 3</span>`;
     }
 
-    const banClass = f.ban === 'Hệ thống' ? 'ban-tag-ht' : 'ban-tag-ttsk';
-    const banName = f.ban === 'Hệ thống' ? '⚙️ Hệ thống' : '📢 TT - Sự kiện';
+    const isCandidateHT = isHeThong(f);
+    const banClass = isCandidateHT ? 'ban-tag-ht' : 'ban-tag-ttsk';
+    const banName = isCandidateHT ? '⚙️ Hệ thống' : '📢 TT - Sự kiện';
 
     // Reviewer badges
     const revBadges = state.reviewers.map(rev => {
@@ -1709,7 +1818,7 @@ function jumpToEvaluateCandidate(candidateId) {
   const form = state.forms.find(f => f.id === parseInt(candidateId));
   if (!form) return;
 
-  state.selectedBan = form.ban === 'Hệ thống' ? 'he-thong' : 'ttsk';
+  state.selectedBan = isHeThong(form) ? 'he-thong' : 'ttsk';
 
   if (!state.selectedReviewer && state.reviewers.length > 0) {
     state.selectedReviewer = state.reviewers[0].name;
@@ -1719,9 +1828,9 @@ function jumpToEvaluateCandidate(candidateId) {
   }
 
   if (state.selectedBan === 'he-thong') {
-    state.filteredForms = state.forms.filter(f => f.ban === 'Hệ thống');
+    state.filteredForms = state.forms.filter(isHeThong);
   } else {
-    state.filteredForms = state.forms.filter(f => f.ban === 'Truyền thông - Sự kiện');
+    state.filteredForms = state.forms.filter(isTTSK);
   }
 
   const targetIdx = state.filteredForms.findIndex(f => f.id === form.id);
