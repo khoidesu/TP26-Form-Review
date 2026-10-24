@@ -1,0 +1,443 @@
+<!DOCTYPE html>
+<html lang="vi">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>🌊 Signal From The Deep Ocean - Form Evaluator</title>
+  <meta name="description" content="Hệ thống đánh giá form Trainee Program 2026 - Signal From The Deep Ocean">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap"
+    rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+  <!-- Background animated elements -->
+  <div class="ocean-bg">
+    <div class="bubble bubble-1"></div>
+    <div class="bubble bubble-2"></div>
+    <div class="bubble bubble-3"></div>
+    <div class="bubble bubble-4"></div>
+    <div class="bubble bubble-5"></div>
+    <div class="bubble bubble-6"></div>
+    <div class="wave wave-1"></div>
+    <div class="wave wave-2"></div>
+    <div class="wave wave-3"></div>
+  </div>
+
+  <!-- Main App -->
+  <div id="app">
+    <!-- Setup Screen -->
+    <div id="setup-screen" class="screen active">
+      <div class="setup-container glass-card">
+        <div class="logo-section">
+          <div class="logo-icon">🐬</div>
+          <h1>Signal From The Deep Ocean</h1>
+          <p class="subtitle">TRAINEE PROGRAM 2026 — Form Evaluator</p>
+          <button id="open-guide-btn" class="btn btn-guide-banner" type="button">
+            <span>💡</span> Hướng dẫn sử dụng & Giới thiệu
+          </button>
+        </div>
+
+        <div class="setup-form">
+          <div class="form-group">
+            <div class="form-label-row">
+              <label for="reviewer-select">
+                <span class="label-icon">👤</span>
+                Người chấm
+              </label>
+              <button id="manage-reviewers-btn" class="btn-text-action" type="button"
+                title="Xem & quản lý các tài khoản">
+                <span>⚙️</span> Quản lý tài khoản
+              </button>
+            </div>
+            <div class="reviewer-select-row">
+              <div class="select-wrapper">
+                <select id="reviewer-select">
+                  <option value="">-- Chọn người chấm --</option>
+                </select>
+              </div>
+              <button id="delete-reviewer-btn" class="btn btn-danger-ghost" type="button" title="Xoá tài khoản này"
+                style="display: none;">
+                <span>🗑️</span> Xoá
+              </button>
+            </div>
+            <div class="divider-text">hoặc thêm mới</div>
+            <div class="input-with-btn">
+              <input type="text" id="new-reviewer" placeholder="Nhập tên người chấm mới...">
+              <button id="add-reviewer-btn" class="btn btn-sm">
+                <span>+</span> Thêm
+              </button>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label>
+              <span class="label-icon">🏢</span>
+              Chọn Ban
+            </label>
+            <div class="ban-selector">
+              <button class="ban-btn" data-ban="he-thong" id="ban-ht">
+                <span class="ban-icon">⚙️</span>
+                <span class="ban-name">Hệ thống</span>
+                <span class="ban-count" id="count-ht">0</span>
+              </button>
+              <button class="ban-btn" data-ban="ttsk" id="ban-ttsk">
+                <span class="ban-icon">📢</span>
+                <span class="ban-name">Truyền thông - Sự kiện</span>
+                <span class="ban-count" id="count-ttsk">0</span>
+              </button>
+            </div>
+          </div>
+
+          <button id="start-btn" class="btn btn-primary btn-lg" disabled>
+            <span>🚀</span> Bắt đầu chấm
+          </button>
+          <button id="setup-export-excel-btn" class="btn btn-excel"
+            style="display: none; margin-top: 10px; width: 100%;">
+            <span>📊</span> Xuất file Excel (1 cột) của <span id="setup-reviewer-name-excel"></span>
+          </button>
+          <button id="setup-export-btn" class="btn btn-export" style="display: none; margin-top: 8px; width: 100%;">
+            <span>📥</span> Tải file TXT đánh giá của <span id="setup-reviewer-name"></span>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Evaluation Screen -->
+    <div id="eval-screen" class="screen">
+      <!-- Header -->
+      <header class="eval-header glass-card">
+        <div class="header-left">
+          <button id="back-btn" class="btn btn-ghost">← Quay lại</button>
+          <div class="header-info">
+            <span class="reviewer-badge" id="current-reviewer"></span>
+            <span class="ban-badge" id="current-ban"></span>
+          </div>
+        </div>
+        <div class="header-center">
+          <div class="progress-info">
+            <span id="progress-text">0/0</span>
+            <div class="progress-bar">
+              <div class="progress-fill" id="progress-fill"></div>
+            </div>
+          </div>
+        </div>
+        <div class="header-right">
+          <button id="header-guide-btn" class="btn btn-ghost btn-sm" title="Xem giới thiệu & hướng dẫn sử dụng">
+            <span>💡</span> Hướng dẫn
+          </button>
+          <button id="export-excel-btn" class="btn btn-excel"
+            title="Xuất file Excel gồm 1 cột (cả Hệ thống & TT-SK) cùng màu đã chấm để copy vào file tổng">
+            <span>📊</span> Xuất Excel (1 cột)
+          </button>
+          <button id="export-txt-btn" class="btn btn-export" title="Tải về file TXT lưu toàn bộ đánh giá của bạn">
+            <span>📥</span> Tải TXT
+          </button>
+          <button id="prev-btn" class="btn btn-nav" disabled>◀ Trước</button>
+          <button id="next-btn" class="btn btn-nav">Sau ▶</button>
+        </div>
+      </header>
+
+      <!-- Split Layout -->
+      <main class="eval-split">
+        <!-- LEFT: Form content (scrollable) -->
+        <div class="split-left" id="split-left">
+          <div class="form-card glass-card">
+            <!-- Form info header -->
+            <div class="form-header">
+              <div class="form-id-badge" id="form-id">ID: 1</div>
+              <h2 class="form-name" id="form-name">Họ và tên</h2>
+              <div class="form-meta">
+                <span class="meta-item" id="form-mssv">MSSV</span>
+                <span class="meta-item" id="form-class">Lớp</span>
+                <span class="meta-item" id="form-email">Email</span>
+              </div>
+            </div>
+
+            <!-- Form content grid -->
+            <div class="form-content" id="form-content">
+              <!-- Dynamic content rendered here -->
+            </div>
+          </div>
+        </div>
+
+        <!-- RIGHT: Evaluation panel (sticky) -->
+        <div class="split-right" id="split-right">
+          <!-- Evaluation section -->
+          <div class="eval-panel glass-card">
+            <div class="eval-section">
+              <h3 class="eval-title">
+                <span><span>📝</span> Đánh giá của bạn</span>
+                <span class="shortcut-tag" title="Phím tắt: Ctrl+S để lưu, A / D để chuyển form">⚡ Phím tắt:
+                  Ctrl+S</span>
+              </h3>
+
+              <!-- Rating selector -->
+              <div class="rating-selector">
+                <label class="rating-label">Chất lượng:</label>
+                <div class="rating-buttons" id="rating-buttons">
+                  <button class="rating-btn" data-rating="excellent" style="--rating-color: #00C853">
+                    <span class="rating-dot"></span>
+                    <span class="rating-text">Cực tốt</span>
+                  </button>
+                  <button class="rating-btn" data-rating="good" style="--rating-color: #2196F3">
+                    <span class="rating-dot"></span>
+                    <span class="rating-text">Tốt</span>
+                  </button>
+                  <button class="rating-btn" data-rating="fair" style="--rating-color: #FFD600">
+                    <span class="rating-dot"></span>
+                    <span class="rating-text">Tạm</span>
+                  </button>
+                  <button class="rating-btn" data-rating="ok" style="--rating-color: #FF9100">
+                    <span class="rating-dot"></span>
+                    <span class="rating-text">Ấy</span>
+                  </button>
+                  <button class="rating-btn" data-rating="poor" style="--rating-color: #FF1744">
+                    <span class="rating-dot"></span>
+                    <span class="rating-text">Tệ</span>
+                  </button>
+                </div>
+              </div>
+
+              <!-- Comment input -->
+              <div class="comment-section">
+                <textarea id="comment-input" placeholder="Nhập nhận xét của bạn về form này..." rows="5"></textarea>
+              </div>
+
+              <!-- Save button -->
+              <div class="eval-actions">
+                <button id="save-btn" class="btn btn-primary">
+                  <span>💾</span> Lưu đánh giá
+                </button>
+                <button id="save-next-btn" class="btn btn-accent">
+                  <span>💾</span> Lưu & Tiếp theo →
+                </button>
+              </div>
+
+              <!-- Status -->
+              <div class="save-status" id="save-status"></div>
+            </div>
+
+            <!-- Other reviewers' evaluations -->
+            <div class="other-evals" id="other-evals">
+              <h3 class="eval-title"><span>👥</span> Đánh giá từ người khác</h3>
+              <div class="other-evals-list" id="other-evals-list"></div>
+            </div>
+          </div>
+        </div>
+      </main>
+
+      <!-- Sidebar - Form list -->
+      <aside class="sidebar glass-card" id="sidebar">
+        <div class="sidebar-header">
+          <h3>📋 Danh sách form</h3>
+          <div style="display: flex; gap: 6px; align-items: center;">
+            <button id="sidebar-export-excel-btn" class="btn btn-excel btn-sm"
+              title="Xuất file Excel 1 cột cả Hệ thống & TT-SK">📊 Excel</button>
+            <button id="sidebar-export-txt-btn" class="btn btn-export btn-sm" title="Tải về file TXT">📥 TXT</button>
+            <button id="toggle-sidebar" class="btn btn-ghost btn-sm">✕</button>
+          </div>
+        </div>
+        <div class="sidebar-list" id="sidebar-list">
+          <!-- Dynamically rendered -->
+        </div>
+      </aside>
+      <button id="open-sidebar" class="btn btn-float" title="Mở danh sách">📋</button>
+    </div>
+  </div>
+
+  <!-- ==================== MODALS ==================== -->
+
+  <!-- 1. Guide / Welcome Modal -->
+  <div id="guide-modal" class="modal-backdrop" style="display: none;">
+    <div class="modal-box modal-lg glass-card guide-box">
+      <div class="modal-header">
+        <div class="modal-title-group">
+          <div class="guide-logo-badge">🐬</div>
+          <div>
+            <h2 class="guide-title">Chào mừng đến với Hệ thống Chấm Form</h2>
+            <p class="guide-subtitle">Signal From The Deep Ocean — Trainee Program 2026</p>
+          </div>
+        </div>
+        <button class="modal-close-btn" id="close-guide-btn" title="Đóng">✕</button>
+      </div>
+      <div class="modal-body guide-body">
+        <div class="guide-intro-banner">
+          <div class="banner-icon">🌊</div>
+          <div class="banner-text">
+            Hệ thống hỗ trợ ban giám khảo chấm điểm và nhận xét các đơn ứng tuyển <strong>Trainee Program 2026</strong>.
+            Dữ liệu đánh giá của bạn sẽ được lưu trực tiếp vào file Excel của chương trình và có thể xuất ra file copy 1
+            cột chuẩn xác từng dòng!
+          </div>
+        </div>
+
+        <div class="guide-steps">
+          <div class="guide-step">
+            <div class="step-num">1</div>
+            <div class="step-content">
+              <h4>👤 Chọn hoặc Thêm / Xoá Người Chấm</h4>
+              <p>
+                Chọn tên của bạn trong danh sách người chấm hoặc nhập tên mới rồi bấm <strong>+ Thêm</strong>.
+                Nếu cần xoá tài khoản thừa/nhầm, bạn có thể chọn tài khoản đó và bấm nút <strong
+                  style="color: #fca5a5;">🗑️ Xoá</strong> (hoặc bấm <strong>⚙️ Quản lý tài khoản</strong>).
+              </p>
+            </div>
+          </div>
+
+          <div class="guide-step">
+            <div class="step-num">2</div>
+            <div class="step-content">
+              <h4>🏢 Chọn Ban Chấm Thi</h4>
+              <p>
+                Chọn <strong>⚙️ Hệ thống</strong> hoặc <strong>📢 Truyền thông - Sự kiện</strong>.
+                Giao diện sẽ tự động lọc danh sách ứng viên và chỉ hiển thị đúng các câu hỏi & câu trả lời chuyên môn
+                thuộc ban đó.
+              </p>
+            </div>
+          </div>
+
+          <div class="guide-step">
+            <div class="step-num">3</div>
+            <div class="step-content">
+              <h4>📝 Đọc Bài Làm & Đánh Giá Ứng Viên</h4>
+              <p>Màn hình chấm được chia làm 2 phần trực quan:</p>
+              <ul class="guide-sublist">
+                <li><strong>Cột bên trái:</strong> Toàn bộ thông tin cá nhân và câu trả lời ứng viên. Các đường liên kết
+                  bài tập / sản phẩm / CV có thể click mở ngay ở tab mới.</li>
+                <li><strong>Cột bên phải:</strong> Chọn mức xếp loại màu sắc và ghi nhận xét chi tiết:
+                  <div class="guide-rating-tags">
+                    <span class="rating-badge rating-badge-excellent">🟢 Cực tốt</span>
+                    <span class="rating-badge rating-badge-good">🔵 Tốt</span>
+                    <span class="rating-badge rating-badge-fair">🟡 Tạm</span>
+                    <span class="rating-badge rating-badge-ok">🟠 Ấy (OK)</span>
+                    <span class="rating-badge rating-badge-poor">🔴 Tệ</span>
+                  </div>
+                </li>
+                <li>Bấm <strong>💾 Lưu đánh giá</strong> hoặc <strong>Lưu & Tiếp theo →</strong> để ghi nhận kết quả.
+                </li>
+                <li>Mục <strong>👥 Đánh giá từ người khác</strong> giúp bạn tham khảo và đối chiếu nhận xét của các giám
+                  khảo khác.</li>
+              </ul>
+            </div>
+          </div>
+
+          <div class="guide-step">
+            <div class="step-num">4</div>
+            <div class="step-content">
+              <h4>⚡ Phím Tắt Tiện Lợi (Chấm Nhanh Bằng Bàn Phím)</h4>
+              <div class="shortcut-grid">
+                <div class="shortcut-card">
+                  <div class="shortcut-keys"><kbd>Ctrl</kbd> + <kbd>S</kbd></div>
+                  <div class="shortcut-desc">Lưu đánh giá form hiện tại</div>
+                </div>
+                <div class="shortcut-card">
+                  <div class="shortcut-keys"><kbd>A</kbd> hoặc <kbd>◀</kbd></div>
+                  <div class="shortcut-desc">Xem lại form trước</div>
+                </div>
+                <div class="shortcut-card">
+                  <div class="shortcut-keys"><kbd>D</kbd> hoặc <kbd>▶</kbd></div>
+                  <div class="shortcut-desc">Chuyển sang form tiếp theo</div>
+                </div>
+                <div class="shortcut-card">
+                  <div class="shortcut-keys"><kbd>📋</kbd></div>
+                  <div class="shortcut-desc">Mở danh sách để xem tổng thể tiến độ</div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="guide-step">
+            <div class="step-num">5</div>
+            <div class="step-content">
+              <h4>📊 Xuất File Báo Cáo Chuẩn Copy Vào File Tổng</h4>
+              <p>
+                Bấm <strong>📊 Xuất Excel (1 cột)</strong>: Hệ thống sẽ tạo một file Excel gồm 1 cột đánh giá có tô màu
+                chuẩn xác, khớp từng dòng với file tổng của BTC (bao gồm cả ứng viên Hệ thống và TT-SK). Bạn chỉ việc
+                copy 1 cột này dán vào cột của mình trong file tổng!
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer guide-footer">
+        <label class="guide-dont-show">
+          <input type="checkbox" id="dont-show-guide-cb" checked>
+          <span>Không tự động hiển thị lại khi vào trang (bạn vẫn có thể mở lại bằng nút Hướng dẫn)</span>
+        </label>
+        <button id="guide-start-btn" class="btn btn-primary btn-lg">
+          <span>🚀</span> Bắt đầu ngay
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 2. Delete Reviewer Confirmation Modal -->
+  <div id="delete-confirm-modal" class="modal-backdrop" style="display: none;">
+    <div class="modal-box modal-sm glass-card">
+      <div class="modal-header">
+        <div class="modal-title-group">
+          <span class="modal-icon-danger">⚠️</span>
+          <h3>Xác nhận xoá tài khoản</h3>
+        </div>
+        <button class="modal-close-btn" id="close-delete-modal-btn" title="Đóng">✕</button>
+      </div>
+      <div class="modal-body">
+        <p class="modal-desc">
+          Bạn có chắc chắn muốn xoá người chấm <strong id="delete-target-name" class="highlight-name">...</strong>
+          không?
+        </p>
+        <div id="delete-warning-eval" class="alert-box alert-warning" style="display: none;">
+          <span class="alert-icon">⚠️</span>
+          <div class="alert-text">
+            Người này đã chấm <strong id="delete-eval-count">0</strong> form. Nếu xoá, toàn bộ điểm số và nhận xét của
+            người này trong file Excel sẽ bị xoá vĩnh viễn và không thể khôi phục!
+          </div>
+        </div>
+        <div id="delete-info-eval" class="alert-box alert-info" style="display: none;">
+          <span class="alert-icon">ℹ️</span>
+          <div class="alert-text">Tài khoản này hiện chưa có bài đánh giá nào.</div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button id="cancel-delete-btn" class="btn btn-ghost" type="button">Huỷ bỏ</button>
+        <button id="confirm-delete-btn" class="btn btn-danger" type="button">
+          <span>🗑️</span> Xác nhận xoá
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 3. Manage Reviewers Modal -->
+  <div id="manage-reviewers-modal" class="modal-backdrop" style="display: none;">
+    <div class="modal-box glass-card manage-box">
+      <div class="modal-header">
+        <div class="modal-title-group">
+          <span class="modal-icon">👥</span>
+          <div>
+            <h3>Quản lý danh sách người chấm</h3>
+            <p class="modal-sub">Xem và xoá các tài khoản người chấm trong hệ thống</p>
+          </div>
+        </div>
+        <button class="modal-close-btn" id="close-manage-modal-btn" title="Đóng">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="manage-reviewers-list" id="manage-reviewers-list">
+          <!-- Rendered dynamically -->
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button id="close-manage-btn" class="btn btn-primary" type="button">Đóng</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast notifications -->
+  <div id="toast-container"></div>
+
+  <script src="app.js"></script>
+</body>
+
+</html>
