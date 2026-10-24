@@ -368,7 +368,7 @@ app.post('/api/gemini/suggest', async (req, res) => {
         }
       ],
       generationConfig: {
-        temperature: 0.2,
+        temperature: 0.7,
         responseMimeType: 'application/json'
       }
     };

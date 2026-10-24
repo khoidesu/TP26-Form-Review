@@ -47,6 +47,8 @@ const state = {
   currentRating: null,
   currentScore: null,
   wsConnected: false,
+  isDirty: false,
+  isSaving: false,
 
   previousScreen: 'setup-screen',
   summaryBanFilter: 'all',
@@ -57,6 +59,22 @@ const state = {
 
 function $(sel) { return document.querySelector(sel); }
 function $$(sel) { return document.querySelectorAll(sel); }
+
+// ---- Unsaved-change tracking (chống mất dữ liệu khi chấm) ----
+function markDirty() {
+  state.isDirty = true;
+}
+
+function clearDirty() {
+  state.isDirty = false;
+}
+
+// Trả về true nếu an toàn để rời khỏi form hiện tại (không có thay đổi,
+// hoặc giám khảo đồng ý huỷ thay đổi). Chặn khi có thay đổi chưa lưu.
+function confirmDiscardChanges() {
+  if (!state.isDirty) return true;
+  return window.confirm('⚠️ Bạn có thay đổi chưa lưu cho form này.\nBấm OK để huỷ thay đổi và chuyển đi, hoặc Cancel để ở lại và lưu.');
+}
 
 function isHeThong(form) {
   if (!form) return false;
@@ -819,6 +837,7 @@ function buildSidebar(searchFilter = '') {
     `;
 
     item.addEventListener('click', () => {
+      if (!confirmDiscardChanges()) return;
       state.currentIndex = idx;
       renderCurrentForm();
       updateSidebarActive();
@@ -913,6 +932,9 @@ function renderCurrentForm() {
   window.scrollTo({ top: 0, behavior: 'smooth' });
   const splitLeft = $('#split-left');
   if (splitLeft) splitLeft.scrollTop = 0;
+
+  // Form vừa được tải lại từ dữ liệu gốc -> chưa có thay đổi nào chưa lưu
+  clearDirty();
 }
 
 function updateRatingButtons() {
@@ -1007,6 +1029,7 @@ function updateProgress() {
 
 // ---- Save Evaluation ----
 async function saveEvaluation(goNext = false) {
+  if (state.isSaving) return false; // chống nhấn đúp / gọi lại khi đang lưu
   const form = state.filteredForms[state.currentIndex];
   if (!form) return false;
 
@@ -1033,8 +1056,19 @@ async function saveEvaluation(goNext = false) {
     return false;
   }
 
+  state.isSaving = true;
+  const saveBtn = $('#save-btn');
+  const saveNextBtn = $('#save-next-btn');
+  const setSaveButtonsDisabled = (disabled) => {
+    if (saveBtn) saveBtn.disabled = disabled;
+    if (saveNextBtn) saveNextBtn.disabled = disabled;
+  };
+  setSaveButtonsDisabled(true);
+
   statusEl.className = 'save-status loading';
   statusEl.textContent = '⏳ Đang lưu vào Google Sheet...';
+
+  let willAdvance = false;
 
   try {
     const res = await fetch(`${API_BASE}/api/evaluate`, {
@@ -1067,14 +1101,19 @@ async function saveEvaluation(goNext = false) {
       form.evaluations[state.selectedReviewer].score = data.score !== undefined ? data.score : score;
       form.evaluations[state.selectedReviewer].fillColor = data.fillColor || (rating && state.ratingColors[rating] ? state.ratingColors[rating].hex : null);
 
+      clearDirty();
       buildSidebar();
       updateProgress();
 
       if (goNext && state.currentIndex < state.filteredForms.length - 1) {
+        willAdvance = true;
+        // Giữ trạng thái "đang lưu" cho đến khi chuyển form xong để chống nhấn đúp nhảy cóc
         setTimeout(() => {
           state.currentIndex++;
           renderCurrentForm();
           updateSidebarActive();
+          state.isSaving = false;
+          setSaveButtonsDisabled(false);
         }, 300);
       }
     } else {
@@ -1084,6 +1123,12 @@ async function saveEvaluation(goNext = false) {
     statusEl.className = 'save-status error';
     statusEl.textContent = `❌ Lỗi: ${err.message}`;
     showToast('Lỗi khi lưu vào Google Sheet!', 'error');
+  } finally {
+    // Chỉ mở khoá ngay khi không có thao tác chuyển form đang chờ
+    if (!willAdvance) {
+      state.isSaving = false;
+      setSaveButtonsDisabled(false);
+    }
   }
 }
 
@@ -1610,45 +1655,61 @@ async function testGeminiApiKey() {
 
 function buildGeminiSystemPrompt() {
   return `Bạn là Trợ lý Ban Giám Khảo AI cao cấp trong chiến dịch tuyển chọn nhân tài "TRAINEE PROGRAM 2026 — SIGNAL FROM THE DEEP OCEAN".
-Nhiệm vụ của bạn là đọc kỹ hồ sơ đơn ứng tuyển, phân tích câu trả lời chuyên môn, động lực, kỹ năng và thái độ của ứng viên để đưa ra GỢI Ý ĐIỂM SỐ (1 đến 5 điểm, đảm bảo công tâm và không thiên vị, chỉ đề xuất 1 điểm khi thật sự không đạt yêu cầu, nhưng phải chắc chắn chấm đúng, không nhân nhượng, mạnh tay dù là 1 hay 5 điểm, phải thật sự phản ánh đúng với bài làm của ứng viên) cùng NHẬN XÉT ĐÁNH GIÁ CÔNG TÂM, SÂU SẮC, GIÚP GIÁM KHẢO TIẾT KIỆM THỜI GIAN NHƯNG VẪN ĐẢM BẢO CHẤT LƯỢNG.
+
+Nhiệm vụ: đọc kỹ hồ sơ, phân tích chuyên môn, động lực, kỹ năng và thái độ của ứng viên để đưa ra GỢI Ý ĐIỂM (1-5) + NHẬN XÉT sắc bén, giúp giám khảo tiết kiệm thời gian.
 
 ---
-🎯 TIÊU CHÍ & THANG ĐIỂM ĐÁNH GIÁ (1 - 5):
-• 5 điểm (Cực tốt - excellent):
-  - Bài làm cực kỳ xuất sắc, có sự đầu tư tâm huyết rõ rệt, câu trả lời sâu sắc, tư duy logic mạch lạc.
-  - Ban Hệ thống: Nắm vững ngôn ngữ lập trình, kiến trúc hệ thống, tư duy giải thuật/backend/DevOps/công nghệ vững vàng, có sản phẩm/dự án cụ thể hoặc định hướng nghề nghiệp rất rõ nét.
-  - Ban Truyền thông - Sự kiện: Portfolio/sản phẩm thiết kế, quay chụp, tổ chức sự kiện hoặc ý tưởng truyền thông vượt trội, sáng tạo, khả năng xử lý tình huống/sự cố sắc bén.
-  - Thái độ: Tinh thần đồng đội cao, cầu tiến, chủ động, cam kết và phù hợp tuyệt đối với văn hoá tổ chức.
-
-• 4 điểm (Tốt - good):
-  - Bài làm chỉn chu, trả lời đầy đủ và đúng trọng tâm các câu hỏi.
-  - Có nền tảng kiến thức/kỹ năng tốt, có kinh nghiệm hoặc định hướng rõ ràng.
-  - Có thái độ làm việc nhóm tích cực, sẵn sàng học hỏi, tiềm năng phát triển lớn.
-
-• 3 điểm (Tạm - fair):
-  - Đạt mức yêu cầu cơ bản, trả lời ở mức vừa phải nhưng còn chung chung, chưa có nhiều điểm nhấn đặc biệt.
-  - Kiến thức/kỹ năng ở mức nhập môn hoặc còn hạn chế, cần được đào tạo thêm nhiều.
-  - Thái độ ổn định nhưng chưa thể hiện được khát khao hoặc cam kết mạnh mẽ.
-
-• 2 điểm (OK - ok):
-  - Bài làm còn sơ sài, câu trả lời ngắn, chưa đầu tư nhiều tâm huyết.
-  - Kỹ năng còn yếu, chưa có định hướng rõ ràng hoặc chưa hiểu rõ về chương trình.
-  - Cần cân nhắc kỹ trước khi lựa chọn.
-
-• 1 điểm (Tệ - poor):
-  - Trả lời qua loa, cẩu thả, cụt ngủn hoặc có dấu hiệu thiếu nghiêm túc, không tôn trọng ban tổ chức.
-  - Không phù hợp với tiêu chí tuyển chọn của chương trình.
+⚠️ NGUYÊN TẮC CHẤM ĐIỂM (BẮT BUỘC TUÂN THỦ):
+1. Đây là thang 5 mức — HÃY DÙNG ĐỦ CẢ 5 MỨC. Không được co cụm quanh 3-4.
+2. Điểm 3 KHÔNG phải "điểm mặc định". Chỉ cho 3 khi bài THỰC SỰ ở giữa (đủ dùng, không nổi bật, không quá kém).
+3. Đừng né 1 và 5 vì quá thận trọng. Cho 5 khi bài thực sự xuất sắc, cho 1 khi thực sự kém/cẩu thả. Né 1 và 5 sẽ khiến thí sinh giỏi - yếu không phân biệt được, GÂY HẠI cho tuyển chọn.
+4. Điểm của giám khảo khác chỉ là THAM KHẢO, KHÔNG được dùng làm neo. Hãy tự đánh giá độc lập từ nội dung bài làm.
 
 ---
-📋 YÊU CẦU ĐỊNH DẠNG ĐẦU RA (JSON BẮT BUỘC):
-Trả về DUY NHẤT một đối tượng JSON hợp lệ (không kèm văn bản mở đầu/kết thúc), cấu trúc chính xác như sau:
+🎯 TIÊU CHÍ & THANG ĐIỂM (chọn MỘT mức khớp nhất):
+
+🟢 5 điểm (Cực tốt — excellent) — cho 5 KHI:
+   - Câu trả lời sâu, cụ thể, có ví dụ/dẫn chứng thật, tư duy logic mạch lạc và có "điểm wow".
+   - Có sản phẩm/dự án/portfolio THẬT và chất lượng, hoặc định hướng nghề nghiệp rất rõ ràng, có chủ đích.
+   - Ban Hệ thống: nắm vững ngôn ngữ/giải thuật/backend/DevOps, đã làm project thật.
+   - Ban TT-SK: portfolio/thiết kế/quay chụp/tổ chức sự kiện vượt trội, xử lý tình huống sắc bén.
+   - Thái độ: chủ động, cầu tiến, cam kết cao, phù hợp văn hoá tổ chức.
+   => LƯU Ý: 5 KHÔNG yêu cầu "hoàn hảo tuyệt đối". Chỉ cần thực sự NỔI TRỘI trong nhóm ứng viên là đủ cho 5.
+
+🔵 4 điểm (Tốt — good) — cho 4 KHI:
+   - Trả lời đầy đủ, đúng trọng tâm, chỉn chu nhưng CHƯA có chiều sâu/điểm nhấn đặc biệt.
+   - Nền tảng tốt, có định hướng rõ nhưng chưa có sản phẩm thật ấn tượng.
+   - Thái độ tích cực, sẵn sàng học hỏi.
+
+🟡 3 điểm (Tạm — fair) — cho 3 KHI:
+   - Đạt mức cơ bản, trả lời chung chung, ít chi tiết cụ thể, không có điểm nhấn.
+   - Kiến thức/kỹ năng ở mức nhập môn, cần đào tạo thêm nhiều.
+
+🟠 2 điểm (OK — ok) — cho 2 KHI:
+   - Bài sơ sài, câu trả lời ngắn, thiếu đầu tư.
+   - Kỹ năng yếu, chưa hiểu rõ chương trình, định hướng mờ nhạt.
+
+🔴 1 điểm (Tệ — poor) — cho 1 KHI:
+   - Trả lời qua loa, cụt ngủn, cẩu thả, sao chép, lạc đề hoặc có dấu hiệu thiếu nghiêm túc/không tôn trọng BTC.
+   => LƯU Ý: 1 không cần "tệ đến cực đoan". Chỉ cần rõ ràng KHÔNG đạt chuẩn tối thiểu là cho 1.
+
+---
+🧭 QUY TRÌNH RA ĐIỂM (làm theo 3 bước):
+B1. Liệt kê nhanh: 2-3 điểm mạnh rõ nhất + 2-3 điểm yếu rõ nhất.
+B2. Đối chiếu từng mức 5→1, chọn mức mà TOÀN BỘ bằng chứng khớp NHẤT.
+B3. Tự kiểm tra: "Tôi có đang né 1 hoặc 5 vì sợ sai không? Nếu có, hãy xét lại bằng chứng."
+Khi phân vân giữa 2 mức liền kề: chọn mức CAO hơn nếu có bằng chứng cụ thể/sản phẩm thật; chọn THẤP hơn nếu chỉ có lời nói chung chung.
+
+---
+📋 ĐỊNH DẠNG ĐẦU RA (JSON BẮT BUỘC):
+Trả về DUY NHẤT một đối tượng JSON hợp lệ (không kèm văn bản mở đầu/kết thúc):
 {
   "suggested_score": 4,
   "rating_key": "good",
   "rating_name": "Tốt",
-  "highlights": "Điểm mạnh nổi bật nhất của ứng viên (1-2 câu ngắn gọn, cụ thể).",
-  "concerns": "Điểm cần lưu ý, hạn chế hoặc câu hỏi phỏng vấn thêm nếu có (1-2 câu).",
-  "suggested_comment": "Đoạn nhận xét chuyên nghiệp, súc tích (khoảng 2-3 câu) để giám khảo có thể điền trực tiếp vào ô nhận xét."
+  "highlights": "Điểm mạnh nổi bật nhất (1-2 câu, cụ thể, có dẫn chứng).",
+  "concerns": "Điểm cần lưu ý/hạn chế hoặc câu hỏi phỏng vấn thêm (1-2 câu).",
+  "suggested_comment": "Nhận xét chuyên nghiệp, súc tích (2-3 câu), điền trực tiếp được vào ô nhận xét."
 }`;
 }
 
@@ -1693,7 +1754,7 @@ GHI CHÚ / NHẬN XÉT SƠ BỘ CỦA GIÁM KHẢO (${state.selectedReviewer}):
   }
   if (otherEvals.length > 0) {
     text += `\n---
-ĐÁNH GIÁ TỪ CÁC GIÁM KHẢO KHÁC ĐÃ CHẤM TRƯỚC ĐÓ (DÙNG ĐỂ THAM KHẢO CHÉO):
+ĐÁNH GIÁ TỪ CÁC GIÁM KHẢO KHÁC ĐÃ CHẤM TRƯỚC ĐÓ (CHỈ THAM KHẢO, KHÔNG DÙNG LÀM NEO ĐIỂM — HÃY TỰ ĐÁNH GIÁ ĐỘC LẬP):
 ${otherEvals.join('\n')}\n`;
   }
 
@@ -1766,7 +1827,7 @@ async function requestAiSuggestion() {
           contents: [{ parts: [{ text: candidatePrompt }] }],
           systemInstruction: { parts: [{ text: systemPrompt }] },
           generationConfig: {
-            temperature: 0.2,
+            temperature: 0.7,
             responseMimeType: 'application/json'
           }
         })
@@ -1786,7 +1847,7 @@ async function requestAiSuggestion() {
             contents: [{ parts: [{ text: candidatePrompt }] }],
             systemInstruction: { parts: [{ text: systemPrompt }] },
             generationConfig: {
-              temperature: 0.2,
+              temperature: 0.7,
               responseMimeType: 'application/json'
             }
           })
@@ -1863,7 +1924,8 @@ function applyAiSuggestion() {
   if (!currentAiSuggestion) return;
 
   const score = parseInt(currentAiSuggestion.suggested_score);
-  const ratingKey = currentAiSuggestion.rating_key || SCORE_MAP[score];
+  // Luôn suy ratingKey từ điểm số để đảm bảo màu/điểm khớp nhau tuyệt đối
+  const ratingKey = SCORE_MAP[score] || currentAiSuggestion.rating_key;
   const comment = currentAiSuggestion.suggested_comment;
 
   if (score && SCORE_MAP[score]) {
@@ -1882,6 +1944,7 @@ function applyAiSuggestion() {
     textarea.focus();
   }
 
+  markDirty();
   showToast(`✅ Đã áp dụng: ${score}đ - ${currentAiSuggestion.rating_name || ''}!`, 'success');
 
   const box = $('#ai-result-box');
@@ -2021,6 +2084,8 @@ function initEventListeners() {
   const forceSyncBtn = $('#force-sync-btn');
   if (forceSyncBtn) {
     forceSyncBtn.addEventListener('click', async () => {
+      // Đồng bộ sẽ ghi đè dữ liệu form hiện tại -> cảnh báo nếu có thay đổi chưa lưu
+      if ($('#eval-screen').classList.contains('active') && !confirmDiscardChanges()) return;
       try {
         forceSyncBtn.classList.add('rotating');
         showToast('⏳ Đang đồng bộ từ Google Sheet...', 'info');
@@ -2057,8 +2122,15 @@ function initEventListeners() {
       state.currentRating = btn.dataset.rating;
       state.currentScore = parseInt(btn.dataset.score) || RATING_TO_SCORE[state.currentRating] || null;
       updateRatingButtons();
+      markDirty();
     });
   });
+
+  // Đánh dấu "có thay đổi chưa lưu" khi gõ nhận xét
+  const commentInputEl = $('#comment-input');
+  if (commentInputEl) {
+    commentInputEl.addEventListener('input', markDirty);
+  }
 
   // Save buttons
   $('#save-btn').addEventListener('click', () => saveEvaluation(false));
@@ -2066,7 +2138,7 @@ function initEventListeners() {
 
   // Navigation
   $('#prev-btn').addEventListener('click', () => {
-    if (state.currentIndex > 0) {
+    if (state.currentIndex > 0 && confirmDiscardChanges()) {
       state.currentIndex--;
       renderCurrentForm();
       updateSidebarActive();
@@ -2074,7 +2146,7 @@ function initEventListeners() {
   });
 
   $('#next-btn').addEventListener('click', () => {
-    if (state.currentIndex < state.filteredForms.length - 1) {
+    if (state.currentIndex < state.filteredForms.length - 1 && confirmDiscardChanges()) {
       state.currentIndex++;
       renderCurrentForm();
       updateSidebarActive();
@@ -2083,6 +2155,7 @@ function initEventListeners() {
 
   // Back button
   $('#back-btn').addEventListener('click', () => {
+    if (!confirmDiscardChanges()) return;
     $('#eval-screen').classList.remove('active');
     $('#setup-screen').classList.add('active');
     closeSidebar();
@@ -2112,7 +2185,9 @@ function initEventListeners() {
 
   const headerSummaryBtn = $('#header-summary-btn');
   if (headerSummaryBtn) {
-    headerSummaryBtn.addEventListener('click', () => openSummaryScreen('eval-screen'));
+    headerSummaryBtn.addEventListener('click', () => {
+      if (confirmDiscardChanges()) openSummaryScreen('eval-screen');
+    });
   }
 
   const summaryBackBtn = $('#summary-back-btn');
@@ -2184,13 +2259,13 @@ function initEventListeners() {
     if (e.target.tagName === 'TEXTAREA' || e.target.tagName === 'INPUT') return;
 
     if (e.key === 'ArrowLeft' || e.key === 'a') {
-      if (state.currentIndex > 0) {
+      if (state.currentIndex > 0 && confirmDiscardChanges()) {
         state.currentIndex--;
         renderCurrentForm();
         updateSidebarActive();
       }
     } else if (e.key === 'ArrowRight' || e.key === 'd') {
-      if (state.currentIndex < state.filteredForms.length - 1) {
+      if (state.currentIndex < state.filteredForms.length - 1 && confirmDiscardChanges()) {
         state.currentIndex++;
         renderCurrentForm();
         updateSidebarActive();
@@ -2213,7 +2288,16 @@ function initEventListeners() {
         }
 
         updateRatingButtons();
+        markDirty();
       }
+    }
+  });
+
+  // Cảnh báo khi đóng/reload tab với thay đổi chưa lưu
+  window.addEventListener('beforeunload', (e) => {
+    if (state.isDirty) {
+      e.preventDefault();
+      e.returnValue = '';
     }
   });
 

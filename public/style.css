@@ -3301,4 +3301,234 @@ kbd {
   align-items: center;
 }
 
+/* ============================================================
+   📱 Mobile / Responsive Enhancements (grading-friendly)
+   ============================================================ */
+
+@media (max-width: 768px) {
+  /* Header: compact, wrap-safe, no horizontal overflow */
+  .eval-header {
+    padding: 10px 12px;
+    gap: 8px;
+  }
+
+  .header-left {
+    flex-wrap: wrap;
+    gap: 8px;
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .header-info {
+    flex-wrap: wrap;
+    gap: 6px;
+    min-width: 0;
+  }
+
+  .reviewer-badge,
+  .ban-badge {
+    font-size: 11px;
+    padding: 3px 10px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 100%;
+  }
+
+  .header-center {
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .header-right {
+    flex-wrap: wrap;
+    gap: 6px;
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .header-right .btn {
+    padding: 8px 10px;
+    font-size: 12px;
+    gap: 4px;
+  }
+
+  /* Navigation buttons more prominent */
+  #prev-btn,
+  #next-btn {
+    flex: 1 1 auto;
+    justify-content: center;
+  }
+
+  /* Split layout: tighter spacing */
+  .eval-split {
+    padding: 12px;
+    gap: 16px;
+  }
+
+  .form-header {
+    padding: 20px 16px 14px;
+  }
+
+  .form-name {
+    font-size: 20px;
+  }
+
+  .form-content {
+    padding: 18px 16px;
+    gap: 14px;
+  }
+
+  .content-item {
+    padding: 14px 14px;
+  }
+
+  .content-label {
+    font-size: 11px;
+  }
+
+  .content-value {
+    font-size: 14px;
+  }
+
+  .eval-section {
+    padding: 18px 16px 16px;
+  }
+
+  /* Rating: keep 5 across, comfortable tap targets */
+  .rating-buttons {
+    gap: 4px;
+  }
+
+  .rating-btn {
+    padding: 8px 2px;
+    gap: 4px;
+    font-size: 10px;
+    min-height: 60px;
+  }
+
+  .rating-dot {
+    width: 10px;
+    height: 10px;
+  }
+
+  .rating-text {
+    font-size: 10px;
+  }
+
+  .rating-score {
+    font-size: 11px;
+  }
+
+  /* Sidebar full width */
+  .sidebar {
+    width: 100%;
+    max-width: 100%;
+  }
+
+  /* Float button */
+  .btn-float {
+    width: 46px;
+    height: 46px;
+    bottom: 16px;
+    right: 16px;
+    font-size: 18px;
+  }
+
+  /* Summary screen */
+  #summary-screen {
+    padding: 16px 12px 40px;
+  }
+
+  .summary-container {
+    padding: 20px 16px;
+    gap: 16px;
+  }
+
+  .summary-title {
+    font-size: 18px;
+  }
+
+  /* Toast */
+  #toast-container {
+    width: calc(100% - 32px);
+  }
+
+  .toast {
+    max-width: 100%;
+  }
+}
+
+@media (max-width: 480px) {
+  .setup-container {
+    padding: 24px 16px;
+  }
+
+  .logo-icon {
+    font-size: 42px;
+  }
+
+  .logo-section h1 {
+    font-size: 20px;
+  }
+
+  .subtitle {
+    font-size: 10px;
+    letter-spacing: 1px;
+  }
+
+  /* Hide secondary header actions on very small screens */
+  .header-right .btn-sheet-link,
+  .header-right #header-guide-btn,
+  .header-right #export-txt-btn {
+    display: none;
+  }
+
+  .header-right .btn {
+    padding: 8px 9px;
+    font-size: 11.5px;
+  }
+
+  .eval-actions {
+    grid-template-columns: 1fr;
+  }
+
+  .eval-actions .btn {
+    width: 100%;
+  }
+
+  .modal-backdrop {
+    padding: 10px;
+  }
+
+  .modal-box {
+    border-radius: var(--radius-lg);
+  }
+
+  .modal-header,
+  .modal-body,
+  .modal-footer {
+    padding-left: 16px;
+    padding-right: 16px;
+  }
+
+  .summary-ban-filters {
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .summary-ban-filters .filter-pill {
+    flex: 1 1 auto;
+  }
+
+  .cd-score-banner {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .cd-banner-actions {
+    flex-wrap: wrap;
+  }
+}
+
 
