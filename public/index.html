@@ -36,6 +36,11 @@
           <div class="logo-icon">🐬</div>
           <h1>Signal From The Deep Ocean</h1>
           <p class="subtitle">TRAINEE PROGRAM 2026 — Form Evaluator</p>
+          <a href="https://docs.google.com/spreadsheets/d/1EkPPK0w5yLrSAGAxsbb3Td8lYZcpuYda4XxFONUyS0E/edit?gid=0#gid=0" target="_blank" rel="noopener" class="sheet-banner-link" title="Mở Google Sheet liên kết">
+            <span class="sheet-banner-dot"></span>
+            <span>📊 GG Sheet: <strong>form-review</strong></span>
+            <span class="sheet-banner-arrow">↗</span>
+          </a>
           <button id="open-guide-btn" class="btn btn-guide-banner" type="button">
             <span>💡</span> Hướng dẫn sử dụng & Giới thiệu
           </button>
@@ -95,6 +100,9 @@
           <button id="start-btn" class="btn btn-primary btn-lg" disabled>
             <span>🚀</span> Bắt đầu chấm
           </button>
+          <button id="open-summary-btn" class="btn btn-summary-banner" type="button">
+            <span>🏆</span> Xem Bảng Tổng Hợp Điểm & Xếp Hạng
+          </button>
           <button id="setup-export-excel-btn" class="btn btn-excel"
             style="display: none; margin-top: 10px; width: 100%;">
             <span>📊</span> Xuất file Excel (1 cột) của <span id="setup-reviewer-name-excel"></span>
@@ -126,12 +134,27 @@
           </div>
         </div>
         <div class="header-right">
+          <div class="sync-status-group">
+            <span class="sync-status-badge" id="sync-status-badge" title="Trạng thái kết nối Google Sheet">
+              <span class="sync-dot"></span>
+              <span id="sync-status-text">Đang kết nối...</span>
+            </span>
+            <button id="force-sync-btn" class="btn btn-ghost btn-sm" title="Làm mới & đồng bộ từ Google Sheet ngay lập tức">
+              <span>🔄</span> Đồng bộ
+            </button>
+          </div>
+          <a href="https://docs.google.com/spreadsheets/d/1EkPPK0w5yLrSAGAxsbb3Td8lYZcpuYda4XxFONUyS0E/edit?gid=0#gid=0" target="_blank" rel="noopener" class="btn btn-sheet-link" title="Mở Google Sheet trên tab mới">
+            <span>📊</span> GG Sheet
+          </a>
+          <button id="header-summary-btn" class="btn btn-accent btn-sm" title="Xem bảng tổng hợp điểm & xếp hạng">
+            <span>🏆</span> Bảng tổng điểm
+          </button>
           <button id="header-guide-btn" class="btn btn-ghost btn-sm" title="Xem giới thiệu & hướng dẫn sử dụng">
             <span>💡</span> Hướng dẫn
           </button>
           <button id="export-excel-btn" class="btn btn-excel"
-            title="Xuất file Excel gồm 1 cột (cả Hệ thống & TT-SK) cùng màu đã chấm để copy vào file tổng">
-            <span>📊</span> Xuất Excel (1 cột)
+            title="Xuất file Excel gồm cột Nhận xét & cột Điểm để đối soát">
+            <span>📊</span> Xuất Excel
           </button>
           <button id="export-txt-btn" class="btn btn-export" title="Tải về file TXT lưu toàn bộ đánh giá của bạn">
             <span>📥</span> Tải TXT
@@ -177,27 +200,36 @@
 
               <!-- Rating selector -->
               <div class="rating-selector">
-                <label class="rating-label">Chất lượng:</label>
+                <div class="rating-label-row">
+                  <label class="rating-label">Chất lượng & Điểm số (1 - 5) <span class="required-star">*</span>:</label>
+                  <span class="required-badge" id="required-score-badge">Bắt buộc</span>
+                  <span class="rating-score-display" id="current-score-display"></span>
+                </div>
                 <div class="rating-buttons" id="rating-buttons">
-                  <button class="rating-btn" data-rating="excellent" style="--rating-color: #00C853">
+                  <button class="rating-btn" data-rating="excellent" data-score="5" style="--rating-color: #00C853" title="5 điểm - Cực tốt">
                     <span class="rating-dot"></span>
                     <span class="rating-text">Cực tốt</span>
+                    <span class="rating-score">5đ</span>
                   </button>
-                  <button class="rating-btn" data-rating="good" style="--rating-color: #2196F3">
+                  <button class="rating-btn" data-rating="good" data-score="4" style="--rating-color: #2196F3" title="4 điểm - Tốt">
                     <span class="rating-dot"></span>
                     <span class="rating-text">Tốt</span>
+                    <span class="rating-score">4đ</span>
                   </button>
-                  <button class="rating-btn" data-rating="fair" style="--rating-color: #FFD600">
+                  <button class="rating-btn" data-rating="fair" data-score="3" style="--rating-color: #FFD600" title="3 điểm - Tạm">
                     <span class="rating-dot"></span>
                     <span class="rating-text">Tạm</span>
+                    <span class="rating-score">3đ</span>
                   </button>
-                  <button class="rating-btn" data-rating="ok" style="--rating-color: #FF9100">
+                  <button class="rating-btn" data-rating="ok" data-score="2" style="--rating-color: #FF9100" title="2 điểm - OK">
                     <span class="rating-dot"></span>
-                    <span class="rating-text">Ấy</span>
+                    <span class="rating-text">OK</span>
+                    <span class="rating-score">2đ</span>
                   </button>
-                  <button class="rating-btn" data-rating="poor" style="--rating-color: #FF1744">
+                  <button class="rating-btn" data-rating="poor" data-score="1" style="--rating-color: #FF1744" title="1 điểm - Tệ">
                     <span class="rating-dot"></span>
                     <span class="rating-text">Tệ</span>
+                    <span class="rating-score">1đ</span>
                   </button>
                 </div>
               </div>
@@ -247,9 +279,170 @@
       </aside>
       <button id="open-sidebar" class="btn btn-float" title="Mở danh sách">📋</button>
     </div>
+
+    <!-- 3. Summary / Leaderboard Screen -->
+    <div id="summary-screen" class="screen">
+      <div class="summary-container glass-card">
+        <!-- Summary Header -->
+        <header class="summary-header">
+          <div class="summary-header-left">
+            <button id="summary-back-btn" class="btn btn-ghost">← Quay lại</button>
+            <div>
+              <h2 class="summary-title">🏆 Bảng Tổng Hợp Điểm Ứng Viên</h2>
+              <p class="summary-subtitle">Trainee Program 2026 — Signal From The Deep Ocean</p>
+            </div>
+          </div>
+          <div class="summary-header-right">
+            <button id="export-summary-excel-btn" class="btn btn-excel">
+              <span>📊</span> Xuất Bảng Điểm (Excel)
+            </button>
+            <a href="https://docs.google.com/spreadsheets/d/1EkPPK0w5yLrSAGAxsbb3Td8lYZcpuYda4XxFONUyS0E/edit?gid=0#gid=0" target="_blank" rel="noopener" class="btn btn-sheet-link" title="Mở Google Sheet trên tab mới">
+              <span>📊</span> GG Sheet
+            </a>
+          </div>
+        </header>
+
+        <!-- Stat Cards -->
+        <div class="stat-grid">
+          <div class="stat-card">
+            <div class="stat-icon">👥</div>
+            <div class="stat-info">
+              <span class="stat-label">Tổng ứng viên</span>
+              <strong class="stat-value" id="stat-total-candidates">0</strong>
+            </div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-icon">📝</div>
+            <div class="stat-info">
+              <span class="stat-label">Đã có đánh giá</span>
+              <strong class="stat-value" id="stat-evaluated-count">0</strong>
+            </div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-icon">🥇</div>
+            <div class="stat-info">
+              <span class="stat-label">Điểm cao nhất</span>
+              <strong class="stat-value" id="stat-max-score">0đ</strong>
+            </div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-icon">⭐</div>
+            <div class="stat-info">
+              <span class="stat-label">Điểm trung bình</span>
+              <strong class="stat-value" id="stat-avg-score">0 ★</strong>
+            </div>
+          </div>
+        </div>
+
+        <!-- Controls Toolbar -->
+        <div class="summary-toolbar">
+          <div class="summary-ban-filters">
+            <button class="filter-pill active" data-filter="all">Tất cả (<span id="filter-all-count">0</span>)</button>
+            <button class="filter-pill" data-filter="he-thong">⚙️ Hệ thống (<span id="filter-ht-count">0</span>)</button>
+            <button class="filter-pill" data-filter="ttsk">📢 TT - Sự kiện (<span id="filter-ttsk-count">0</span>)</button>
+          </div>
+
+          <div class="summary-search-sort">
+            <div class="search-box">
+              <span class="search-icon">🔍</span>
+              <input type="text" id="summary-search-input" placeholder="Tìm tên, MSSV, lớp...">
+            </div>
+
+            <div class="sort-box">
+              <label for="summary-sort-select">Sắp xếp:</label>
+              <select id="summary-sort-select">
+                <option value="score-desc">⬇️ Tổng điểm (Cao ➔ Thấp)</option>
+                <option value="score-asc">⬆️ Tổng điểm (Thấp ➔ Cao)</option>
+                <option value="avg-desc">⬇️ Điểm trung bình</option>
+                <option value="id-asc">🔢 ID tăng dần</option>
+                <option value="name-asc">🔤 Tên (A ➔ Z)</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <!-- Summary Table -->
+        <div class="summary-table-wrapper">
+          <table class="summary-table" id="summary-table">
+            <thead>
+              <tr>
+                <th style="width: 70px;">Hạng</th>
+                <th style="width: 65px;">ID</th>
+                <th>Ứng viên</th>
+                <th>Ban</th>
+                <th style="min-width: 220px;">Điểm từng giám khảo</th>
+                <th style="width: 110px; text-align: center;">Tổng điểm</th>
+                <th style="width: 95px; text-align: center;">Điểm TB</th>
+                <th style="width: 170px; text-align: center;">Thao tác</th>
+              </tr>
+            </thead>
+            <tbody id="summary-table-body">
+              <!-- Dynamically populated -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
   </div>
 
   <!-- ==================== MODALS ==================== -->
+
+  <!-- 0. Candidate Detail Modal -->
+  <div id="candidate-detail-modal" class="modal-backdrop" style="display: none;">
+    <div class="modal-box modal-lg glass-card candidate-detail-box">
+      <div class="modal-header">
+        <div class="modal-title-group">
+          <span class="candidate-detail-badge" id="cd-id">ID: #1</span>
+          <div>
+            <h2 class="candidate-detail-name" id="cd-name">Họ và tên</h2>
+            <p class="candidate-detail-meta" id="cd-meta">MSSV • Ban • Lớp</p>
+          </div>
+        </div>
+        <button class="modal-close-btn" id="close-cd-modal-btn" title="Đóng">✕</button>
+      </div>
+      <div class="modal-body candidate-detail-body">
+        <!-- Scores Summary Banner -->
+        <div class="cd-score-banner">
+          <div class="cd-score-stat">
+            <span class="cd-stat-label">Tổng điểm</span>
+            <strong class="cd-stat-value highlight" id="cd-total-score">0đ</strong>
+          </div>
+          <div class="cd-score-stat">
+            <span class="cd-stat-label">Điểm trung bình</span>
+            <strong class="cd-stat-value" id="cd-avg-score">0 ★</strong>
+          </div>
+          <div class="cd-score-stat">
+            <span class="cd-stat-label">Tiến độ chấm</span>
+            <strong class="cd-stat-value" id="cd-eval-progress">0/0 GK</strong>
+          </div>
+          <div class="cd-banner-actions">
+            <button id="cd-export-excel-btn" class="btn btn-excel btn-sm" title="Tải file Excel riêng chứa toàn bộ nhận xét & câu trả lời của ứng viên này">
+              <span>📥</span> Xuất Excel riêng
+            </button>
+            <button id="cd-jump-eval-btn" class="btn btn-primary btn-sm" title="Chuyển đến màn hình chấm để đánh giá form này">
+              <span>✏️</span> Chấm form này
+            </button>
+          </div>
+        </div>
+
+        <!-- Section 1: Reviews from All Reviewers -->
+        <div class="cd-section">
+          <h3 class="cd-section-title"><span>📝</span> Đánh giá từ Ban Giám Khảo</h3>
+          <div class="cd-evals-list" id="cd-evals-list">
+            <!-- Dynamically populated -->
+          </div>
+        </div>
+
+        <!-- Section 2: Form Questions & Answers -->
+        <div class="cd-section">
+          <h3 class="cd-section-title"><span>📋</span> Nội dung trả lời form ứng tuyển</h3>
+          <div class="cd-answers-list" id="cd-answers-list">
+            <!-- Dynamically populated -->
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
 
   <!-- 1. Guide / Welcome Modal -->
   <div id="guide-modal" class="modal-backdrop" style="display: none;">

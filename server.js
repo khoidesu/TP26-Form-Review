@@ -1,509 +1,359 @@
 const express = require('express');
+const http = require('http');
+const WebSocket = require('ws');
 const ExcelJS = require('exceljs');
 const cors = require('cors');
 const path = require('path');
 const fs = require('fs');
+const googleSheetsService = require('./googleSheetsService');
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
-// Find the Excel file
+const server = http.createServer(app);
+const wss = new WebSocket.Server({ server });
+
+// Track connected WebSocket clients
+const clients = new Set();
+
+wss.on('connection', (ws) => {
+  clients.add(ws);
+  ws.isAlive = true;
+
+  ws.on('pong', () => {
+    ws.isAlive = true;
+  });
+
+  ws.on('message', (msg) => {
+    try {
+      const data = JSON.parse(msg);
+      if (data.type === 'PING') {
+        ws.send(JSON.stringify({ type: 'PONG' }));
+      }
+    } catch (e) {}
+  });
+
+  ws.on('close', () => {
+    clients.delete(ws);
+  });
+
+  // Send initial welcome message
+  ws.send(JSON.stringify({ type: 'CONNECTED', message: 'Real-time WebSocket connected' }));
+});
+
+// Ping interval to keep connections alive
+const pingInterval = setInterval(() => {
+  wss.clients.forEach((ws) => {
+    if (ws.isAlive === false) return ws.terminate();
+    ws.isAlive = false;
+    ws.ping();
+  });
+}, 30000);
+
+wss.on('close', () => {
+  clearInterval(pingInterval);
+});
+
+// Broadcast helper
+function broadcast(payload) {
+  const message = JSON.stringify(payload);
+  for (const client of clients) {
+    if (client.readyState === WebSocket.OPEN) {
+      client.send(message);
+    }
+  }
+}
+
+// Find local Excel file (if present, for backup)
 function getExcelPath() {
-  const files = fs.readdirSync(__dirname);
-  const xlsxFile = files.find(f => f.endsWith('.xlsx'));
-  if (!xlsxFile) throw new Error('No xlsx file found');
-  return path.join(__dirname, xlsxFile);
+  try {
+    const files = fs.readdirSync(__dirname);
+    const xlsxFile = files.find(f => f.endsWith('.xlsx') && !f.startsWith('~$'));
+    return xlsxFile ? path.join(__dirname, xlsxFile) : null;
+  } catch (e) {
+    return null;
+  }
 }
 
-// Helper: extract cell value (handle formulas, rich text, etc.)
-function getCellValue(cell) {
-  if (!cell || cell.value === null || cell.value === undefined) return '';
-  const v = cell.value;
-  // ExcelJS formula object: { formula, result }
-  if (typeof v === 'object' && v !== null) {
-    if (v.result !== undefined && v.result !== null) {
-      // result can also be richText
-      if (typeof v.result === 'object' && v.result.richText) {
-        return v.result.richText.map(rt => rt.text).join('');
-      }
-      return String(v.result);
-    }
-    if (v.richText) {
-      return v.richText.map(rt => rt.text).join('');
-    }
-    if (v.text) return String(v.text);
-    if (v.formula) return ''; // formula with no cached result
-    return String(v);
-  }
-  return String(v);
-}
-
-// Mapping: RESPONSES sheet column -> ĐÁNH GIÁ sheet column label
-// RESPONSES columns: F(6)=Họ tên, G(7)=MSSV, I(9)=Email, J(10)=Lớp,
-// L(12)..AD(30) = answer columns
-// ĐÁNH GIÁ columns: 1=ID, 2=Họ tên, 3=MSSV, 4=Email, 5=Lớp, 6..24=answers
-const RESPONSE_TO_EVAL_MAP = {
-  // RESPONSES col -> ĐÁNH GIÁ col index
-  6: 2,   // Họ và tên
-  7: 3,   // MSSV
-  9: 4,   // Email
-  10: 5,  // Lớp sinh hoạt
-  12: 6,  // Tự định nghĩa bản thân
-  13: 7,  // Kỹ năng mới
-  14: 8,  // Lịch học
-  15: 9,  // Lĩnh vực (Ban)
-  16: 10, // Ngôn ngữ lập trình
-  17: 11, // Định hướng nghề nghiệp
-  18: 12, // Kế hoạch nhóm
-  19: 13, // Kiến thức Hệ thống
-  20: 14, // Lĩnh vực hứng thú TTSK
-  21: 15, // Kỹ năng thiết kế
-  22: 16, // Thiết bị chụp ảnh
-  23: 17, // Link sản phẩm
-  24: 18, // Tìm ý tưởng sáng tạo
-  25: 19, // Xử lý ý kiến phản đối
-  26: 20, // Leader/Khác
-  27: 21, // Quản lý nhóm
-  28: 22, // Xử lý sự cố
-  29: 23, // Mong đợi Trainee
-  30: 24, // Lời nhắn BTC
-};
-
-const COLUMN_MAP = {
-  1: 'ID',
-  2: 'Họ và tên',
-  3: 'MSSV',
-  4: 'Email',
-  5: 'Lớp sinh hoạt',
-  6: 'Tự định nghĩa bản thân',
-  7: 'Kỹ năng mới đã học',
-  8: 'Lịch học mong muốn',
-  9: 'Lĩnh vực mong muốn (Ban)',
-  10: 'Ngôn ngữ lập trình',
-  11: 'Định hướng nghề nghiệp',
-  12: 'Kế hoạch làm việc nhóm',
-  13: 'Kiến thức Hệ thống',
-  14: 'Lĩnh vực hứng thú (TTSK)',
-  15: 'Kỹ năng thiết kế',
-  16: 'Thiết bị chụp ảnh',
-  17: 'Link sản phẩm',
-  18: 'Tìm ý tưởng sáng tạo',
-  19: 'Xử lý ý kiến phản đối',
-  20: 'Vai trò Leader/Khác',
-  21: 'Quản lý nhóm',
-  22: 'Xử lý sự cố sự kiện',
-  23: 'Mong đợi Trainee Program',
-  24: 'Lời nhắn BTC'
-};
-
-// Which columns are relevant for which ban
-const HE_THONG_COLS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 19, 23, 24];
-const TTSK_COLS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24];
-
-// Rating color map
-const RATING_COLORS = {
-  'excellent': { hex: 'FF00C853', name: 'Cực tốt', color: '#00C853' },
-  'good':      { hex: 'FF2196F3', name: 'Tốt', color: '#2196F3' },
-  'fair':      { hex: 'FFFFD600', name: 'Tạm', color: '#FFD600' },
-  'ok':        { hex: 'FFFF9100', name: 'OK', color: '#FF9100' },
-  'poor':      { hex: 'FFFF1744', name: 'Tệ', color: '#FF1744' }
-};
-
-// GET /api/data - Read all forms data
-app.get('/api/data', async (req, res) => {
+// Helper: Backup evaluation to local Excel file
+async function backupToLocalExcel(rowIndex, reviewerName, comment, ratingKey, score) {
   try {
     const filePath = getExcelPath();
+    if (!filePath) return;
+
     const workbook = new ExcelJS.Workbook();
     await workbook.xlsx.readFile(filePath);
-
-    // ---- Read actual data from RESPONSES sheet ----
-    const wsResp = workbook.getWorksheet('RESPONSES');
-    const responseData = {}; // key: ID, value: { colIndex: value }
-
-    for (let rowIdx = 2; rowIdx <= wsResp.rowCount; rowIdx++) {
-      const row = wsResp.getRow(rowIdx);
-      const id = getCellValue(row.getCell(1)); // Column A = Id
-      if (!id || id === '' || id === '0') continue;
-
-      const data = { 1: id }; // col 1 = ID
-      for (const [respCol, evalCol] of Object.entries(RESPONSE_TO_EVAL_MAP)) {
-        const val = getCellValue(row.getCell(parseInt(respCol)));
-        data[evalCol] = val;
-      }
-      responseData[id] = data;
-    }
-
-    // ---- Read evaluations from ĐÁNH GIÁ sheet ----
     const wsEval = workbook.getWorksheet('ĐÁNH GIÁ');
+    if (!wsEval) return;
 
-    // Get reviewer names from row 2 (columns 26+)
-    const reviewers = [];
-    const row2 = wsEval.getRow(2);
-    for (let col = 26; col <= 50; col++) {
-      const val = getCellValue(row2.getCell(col));
-      if (val) {
-        reviewers.push({ name: val, colIndex: col });
-      }
-    }
-
-    // Build forms list
-    const forms = [];
-    for (let rowIdx = 3; rowIdx <= wsEval.rowCount; rowIdx++) {
-      const row = wsEval.getRow(rowIdx);
-      const idCell = row.getCell(1);
-      const id = getCellValue(idCell);
-      if (!id || id === '' || id === '0') continue;
-
-      // Get form data from RESPONSES
-      const formData = responseData[id] || { 1: id };
-
-      // Read existing evaluations from ĐÁNH GIÁ
-      const evaluations = {};
-      for (const reviewer of reviewers) {
-        const cell = row.getCell(reviewer.colIndex);
-        const val = getCellValue(cell);
-        let fillColor = null;
-
-        if (cell.style && cell.style.fill) {
-          const fill = cell.style.fill;
-          if (fill.fgColor && fill.fgColor.argb && fill.fgColor.argb !== '00000000') {
-            fillColor = fill.fgColor.argb;
-          }
-        }
-
-        evaluations[reviewer.name] = {
-          comment: val,
-          fillColor: fillColor
-        };
-      }
-
-      forms.push({
-        rowIndex: rowIdx,
-        id: parseInt(id),
-        data: formData,
-        ban: formData[9] || '',
-        evaluations: evaluations
-      });
-    }
-
-    // Sort by ID
-    forms.sort((a, b) => a.id - b.id);
-
-    res.json({
-      forms,
-      reviewers,
-      columnMap: COLUMN_MAP,
-      heThongCols: HE_THONG_COLS,
-      ttskCols: TTSK_COLS,
-      ratingColors: RATING_COLORS
-    });
-  } catch (error) {
-    console.error('Error reading file:', error);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// POST /api/evaluate - Save evaluation
-app.post('/api/evaluate', async (req, res) => {
-  try {
-    const { rowIndex, reviewerCol, comment, ratingKey } = req.body;
-
-    const filePath = getExcelPath();
-    const workbook = new ExcelJS.Workbook();
-    await workbook.xlsx.readFile(filePath);
-
-    const wsEval = workbook.getWorksheet('ĐÁNH GIÁ');
-    const row = wsEval.getRow(rowIndex);
-    const cell = row.getCell(reviewerCol);
-
-    // Set comment
-    cell.value = comment;
-
-    // Set fill color based on rating
-    if (ratingKey && RATING_COLORS[ratingKey]) {
-      cell.fill = {
-        type: 'pattern',
-        pattern: 'solid',
-        fgColor: { argb: RATING_COLORS[ratingKey].hex }
-      };
-    } else {
-      cell.fill = {
-        type: 'pattern',
-        pattern: 'none'
-      };
-    }
-
-    cell.alignment = { wrapText: true, vertical: 'top' };
-
-    row.commit();
-    await workbook.xlsx.writeFile(filePath);
-
-    res.json({ success: true });
-  } catch (error) {
-    console.error('Error saving evaluation:', error);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// POST /api/add-reviewer - Add a new reviewer column
-app.post('/api/add-reviewer', async (req, res) => {
-  try {
-    const { name } = req.body;
-    if (!name || !name.trim()) return res.status(400).json({ error: 'Vui lòng nhập tên người chấm' });
-
-    const trimmedName = name.trim();
-    const filePath = getExcelPath();
-    const workbook = new ExcelJS.Workbook();
-    await workbook.xlsx.readFile(filePath);
-
-    const wsEval = workbook.getWorksheet('ĐÁNH GIÁ');
-    const row2 = wsEval.getRow(2);
-
-    // Check for duplicate name & find next available column
-    let nextCol = null;
-    for (let col = 26; col <= 50; col++) {
-      const val = getCellValue(row2.getCell(col));
-      if (val && val.trim().toLowerCase() === trimmedName.toLowerCase()) {
-        return res.status(400).json({ error: `Người chấm "${trimmedName}" đã tồn tại!` });
-      }
-      if (!val && nextCol === null) {
-        nextCol = col;
-      }
-    }
-
-    if (!nextCol) {
-      return res.status(400).json({ error: 'Đã đạt giới hạn tối đa số lượng người chấm (cột 50)' });
-    }
-
-    const cell = row2.getCell(nextCol);
-    cell.value = trimmedName;
-    cell.font = { bold: true, size: 11 };
-    cell.fill = {
-      type: 'pattern',
-      pattern: 'solid',
-      fgColor: { argb: 'FFFFF176' }
-    };
-    cell.alignment = { horizontal: 'center' };
-
-    row2.commit();
-    await workbook.xlsx.writeFile(filePath);
-
-    res.json({ success: true, colIndex: nextCol, name: trimmedName });
-  } catch (error) {
-    console.error('Error adding reviewer:', error);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// POST /api/delete-reviewer - Delete a reviewer column and shift subsequent columns left
-app.post('/api/delete-reviewer', async (req, res) => {
-  try {
-    const { name, colIndex } = req.body;
-    if (!name && !colIndex) {
-      return res.status(400).json({ error: 'Vui lòng cung cấp tên hoặc cột người chấm cần xoá' });
-    }
-
-    const filePath = getExcelPath();
-    const workbook = new ExcelJS.Workbook();
-    await workbook.xlsx.readFile(filePath);
-
-    const wsEval = workbook.getWorksheet('ĐÁNH GIÁ');
-    const row2 = wsEval.getRow(2);
-
-    // Collect all reviewer columns
-    const reviewers = [];
-    for (let col = 26; col <= 50; col++) {
-      const val = getCellValue(row2.getCell(col));
-      if (val) {
-        reviewers.push({ name: val, colIndex: col });
-      }
-    }
-
-    // Find the target reviewer
-    let target = null;
-    if (colIndex) {
-      target = reviewers.find(r => r.colIndex === parseInt(colIndex));
-    }
-    if (!target && name) {
-      target = reviewers.find(r => r.name.trim().toLowerCase() === name.trim().toLowerCase());
-    }
-
-    if (!target) {
-      return res.status(404).json({ error: 'Không tìm thấy người chấm cần xoá' });
-    }
-
-    const targetCol = target.colIndex;
-    const lastCol = reviewers[reviewers.length - 1].colIndex;
-
-    // Shift reviewer columns to the left from targetCol to lastCol for row 2 to wsEval.rowCount
-    for (let r = 2; r <= wsEval.rowCount; r++) {
-      const row = wsEval.getRow(r);
-      for (let c = targetCol; c < lastCol; c++) {
-        const nextCell = row.getCell(c + 1);
-        const currCell = row.getCell(c);
-        currCell.value = nextCell.value;
-        currCell.style = nextCell.style ? JSON.parse(JSON.stringify(nextCell.style)) : {};
-      }
-      const lastCell = row.getCell(lastCol);
-      lastCell.value = null;
-      lastCell.style = {};
-      row.commit();
-    }
-
-    await workbook.xlsx.writeFile(filePath);
-
-    res.json({ success: true, deletedName: target.name, deletedCol: targetCol });
-  } catch (error) {
-    console.error('Error deleting reviewer:', error);
-    res.status(500).json({ error: error.message });
-  }
-});
-// Helper to infer rating color from text if fillColor was not set
-function inferRatingColor(val, existingFill) {
-  if (existingFill) return existingFill;
-  if (!val) return null;
-  const s = String(val).toUpperCase();
-  if (s.includes('GUD!') || s.includes('CỰC TỐT')) return 'FF00C853';
-  if (s.includes('GOOD!') || s.includes('TỐT')) return 'FF2196F3';
-  if (s.includes('MID!') || s.includes('TẠM')) return 'FFFFD600';
-  if (s.includes('OKI!') || s.includes('OK!')) return 'FFFF9100';
-  if (s.includes('BAD!') || s.includes('TỆ')) return 'FFFF1744';
-  return null;
-}
-
-// GET /api/export-excel - Export 1-column Excel file with both Hệ thống and TT-SK in exact row order
-app.get('/api/export-excel', async (req, res) => {
-  try {
-    const reviewerName = req.query.reviewer;
-    if (!reviewerName) {
-      return res.status(400).json({ error: 'Reviewer name required' });
-    }
-
-    const filePath = getExcelPath();
-    const wbMaster = new ExcelJS.Workbook();
-    await wbMaster.xlsx.readFile(filePath);
-
-    const wsEval = wbMaster.getWorksheet('ĐÁNH GIÁ');
-    const wsResp = wbMaster.getWorksheet('RESPONSES');
-
-    // Find reviewer column in row 2 of ĐÁNH GIÁ
+    // Find reviewer column in row 2
     let reviewerCol = null;
     const row2 = wsEval.getRow(2);
-    for (let col = 26; col <= 50; col++) {
-      const val = getCellValue(row2.getCell(col));
-      if (val && val.trim().toLowerCase() === reviewerName.trim().toLowerCase()) {
-        reviewerCol = col;
+    for (let c = 26; c <= 50; c++) {
+      const v = row2.getCell(c).value;
+      if (v && String(v).trim().toLowerCase() === reviewerName.trim().toLowerCase()) {
+        reviewerCol = c;
         break;
       }
     }
 
-    if (!reviewerCol) {
-      return res.status(404).json({ error: `Reviewer '${reviewerName}' not found` });
+    if (reviewerCol) {
+      const row = wsEval.getRow(rowIndex);
+      const cell = row.getCell(reviewerCol);
+      cell.value = comment;
+
+      if (ratingKey && googleSheetsService.RATING_COLORS[ratingKey]) {
+        cell.fill = {
+          type: 'pattern',
+          pattern: 'solid',
+          fgColor: { argb: googleSheetsService.RATING_COLORS[ratingKey].hex }
+        };
+      } else {
+        cell.fill = { type: 'pattern', pattern: 'none' };
+      }
+      cell.alignment = { wrapText: true, vertical: 'top' };
+      row.commit();
+      await workbook.xlsx.writeFile(filePath);
+    }
+  } catch (err) {
+    console.warn('Local Excel backup warning:', err.message);
+  }
+}
+
+// GET /api/data - Fetch all forms & reviewer data from Google Sheet
+app.get('/api/data', async (req, res) => {
+  try {
+    const data = await googleSheetsService.fetchFromGoogleSheet(false);
+    res.json(data);
+  } catch (error) {
+    console.error('Error in /api/data:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// GET /api/sync - Force refresh from Google Sheet
+app.get('/api/sync', async (req, res) => {
+  try {
+    const data = await googleSheetsService.fetchFromGoogleSheet(true);
+    broadcast({ type: 'DATA_REFRESHED', lastSynced: data.lastSynced });
+    res.json({ success: true, lastSynced: data.lastSynced, formCount: data.forms.length });
+  } catch (error) {
+    console.error('Error in /api/sync:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// POST /api/evaluate - Save evaluation (comment + 1-5 score) to Google Sheet & Broadcast
+app.post('/api/evaluate', async (req, res) => {
+  try {
+    const { rowIndex, reviewerName, reviewerCol, comment, ratingKey, score } = req.body;
+
+    if (!rowIndex || (!reviewerName && !reviewerCol)) {
+      return res.status(400).json({ error: 'Thiếu thông tin đánh giá (rowIndex, reviewer)!' });
     }
 
-    // Build map of response data by ID
-    const responseData = {};
-    for (let r = 2; r <= wsResp.rowCount; r++) {
-      const row = wsResp.getRow(r);
-      const id = getCellValue(row.getCell(1));
-      if (!id || id === '' || id === '0') continue;
-      responseData[id] = {
-        name: getCellValue(row.getCell(6)),
-        mssv: getCellValue(row.getCell(7)),
-        email: getCellValue(row.getCell(9)),
-        ban: getCellValue(row.getCell(15))
-      };
+    // Validation: Reviewer MUST choose a score (1 - 5)
+    const parsedScore = (score !== undefined && score !== null && score !== '') ? parseInt(score) : null;
+    if (!ratingKey && (parsedScore === null || isNaN(parsedScore) || parsedScore < 1 || parsedScore > 5)) {
+      return res.status(400).json({ error: 'Bắt buộc phải chọn điểm đánh giá (1 - 5 điểm) trước khi lưu và chấm bài!' });
     }
 
-    // Create export workbook
+    // Save to Google Sheet
+    const result = await googleSheetsService.saveEvaluation({
+      rowIndex: parseInt(rowIndex),
+      reviewerName,
+      reviewerCol: reviewerCol ? parseInt(reviewerCol) : undefined,
+      comment: comment || '',
+      ratingKey: ratingKey || null,
+      score: parsedScore || undefined
+    });
+
+    // Find form ID for broadcasting
+    const cache = await googleSheetsService.fetchFromGoogleSheet(false);
+    const form = cache.forms.find(f => f.rowIndex === parseInt(rowIndex));
+    const formId = form ? form.id : parseInt(rowIndex) - 2;
+    const actualReviewerName = reviewerName || (cache.reviewers.find(r => r.colIndex === parseInt(reviewerCol))?.name);
+
+    // Broadcast to all connected WebSocket clients
+    broadcast({
+      type: 'EVALUATION_UPDATED',
+      rowIndex: parseInt(rowIndex),
+      formId: formId,
+      reviewer: actualReviewerName,
+      comment: comment || '',
+      ratingKey: result.ratingKey,
+      score: result.score,
+      fillColor: result.fillColor,
+      timestamp: new Date().toISOString()
+    });
+
+    // Backup to local file asynchronously
+    backupToLocalExcel(parseInt(rowIndex), actualReviewerName, comment, ratingKey, result.score);
+
+    res.json({
+      success: true,
+      score: result.score,
+      ratingKey: result.ratingKey,
+      fillColor: result.fillColor
+    });
+  } catch (error) {
+    console.error('Error in /api/evaluate:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// POST /api/add-reviewer - Add a new reviewer column to Google Sheet
+app.post('/api/add-reviewer', async (req, res) => {
+  try {
+    const { name } = req.body;
+    if (!name || !name.trim()) {
+      return res.status(400).json({ error: 'Vui lòng nhập tên người chấm!' });
+    }
+
+    const result = await googleSheetsService.addReviewer(name);
+
+    // Broadcast reviewer added
+    broadcast({
+      type: 'REVIEWER_ADDED',
+      name: result.name,
+      colIndex: result.colIndex,
+      scoreColIndex: result.scoreColIndex
+    });
+
+    res.json(result);
+  } catch (error) {
+    console.error('Error in /api/add-reviewer:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// POST /api/delete-reviewer - Delete/clear reviewer columns in Google Sheet
+app.post('/api/delete-reviewer', async (req, res) => {
+  try {
+    const { name } = req.body;
+    if (!name || !name.trim()) {
+      return res.status(400).json({ error: 'Vui lòng cung cấp tên người chấm cần xoá!' });
+    }
+
+    const result = await googleSheetsService.deleteReviewer(name);
+
+    broadcast({
+      type: 'REVIEWER_DELETED',
+      deletedName: name
+    });
+
+    res.json(result);
+  } catch (error) {
+    console.error('Error in /api/delete-reviewer:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// GET /api/export-excel - Export Excel file with Reviewer comments and scores
+app.get('/api/export-excel', async (req, res) => {
+  try {
+    const reviewerName = req.query.reviewer;
+    if (!reviewerName) {
+      return res.status(400).json({ error: 'Cần có tên người chấm (reviewer)' });
+    }
+
+    const data = await googleSheetsService.fetchFromGoogleSheet(false);
+    const reviewer = data.reviewers.find(r => r.name.toLowerCase() === reviewerName.trim().toLowerCase());
+
+    if (!reviewer) {
+      return res.status(404).json({ error: `Không tìm thấy người chấm '${reviewerName}'` });
+    }
+
     const wbOut = new ExcelJS.Workbook();
     wbOut.creator = 'Signal From The Deep Ocean - Form Evaluator';
     wbOut.created = new Date();
 
     // ----------------------------------------------------
-    // Sheet 1: 1 Cột Copy Vào File Tổng (Khớp chuẩn từng dòng)
+    // Sheet 1: Cot_Copy_Vao_File_Tong (Cột nhận xét + Cột Điểm)
     // ----------------------------------------------------
     const ws1 = wbOut.addWorksheet('Cot_Copy_Vao_File_Tong');
-    ws1.getColumn(1).width = 70;
+    ws1.getColumn(1).width = 75; // Cột Nhận xét
+    ws1.getColumn(2).width = 16; // Cột Điểm
 
-    // Row 1: Header ĐÁNH GIÁ
+    // Row 1: Header
     const r1 = ws1.getRow(1);
-    r1.getCell(1).value = 'ĐÁNH GIÁ';
-    r1.getCell(1).font = { name: 'Calibri', size: 11, bold: true, color: { argb: 'FFFFFFFF' } };
-    r1.getCell(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1E293B' } };
-    r1.getCell(1).alignment = { horizontal: 'center', vertical: 'middle' };
-    r1.height = 26;
+    r1.getCell(1).value = 'ĐÁNH GIÁ (NHẬN XÉT)';
+    r1.getCell(2).value = 'ĐIỂM (1 - 5)';
+    [1, 2].forEach(c => {
+      r1.getCell(c).font = { name: 'Calibri', size: 11, bold: true, color: { argb: 'FFFFFFFF' } };
+      r1.getCell(c).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1E293B' } };
+      r1.getCell(c).alignment = { horizontal: 'center', vertical: 'middle' };
+    });
+    r1.height = 28;
 
-    // Row 2: Reviewer Name (Matches row 2 in master sheet)
+    // Row 2: Reviewer Name & Score Header
     const r2 = ws1.getRow(2);
-    r2.getCell(1).value = reviewerName;
-    r2.getCell(1).font = { name: 'Calibri', size: 11, bold: true, color: { argb: 'FF000000' } };
-    r2.getCell(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFF176' } };
-    r2.getCell(1).alignment = { horizontal: 'center', vertical: 'middle' };
-    r2.height = 26;
+    r2.getCell(1).value = reviewer.name;
+    r2.getCell(2).value = `Điểm - ${reviewer.name}`;
+    [1, 2].forEach(c => {
+      r2.getCell(c).font = { name: 'Calibri', size: 11, bold: true, color: { argb: 'FF000000' } };
+      r2.getCell(c).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFF176' } };
+      r2.getCell(c).alignment = { horizontal: 'center', vertical: 'middle' };
+    });
+    r2.height = 28;
 
-    // List of candidate rows for Sheet 2
     const candidateList = [];
 
-    // Rows 3 to wsEval.rowCount (matches exact row in master sheet!)
-    for (let r = 3; r <= wsEval.rowCount; r++) {
-      const masterRow = wsEval.getRow(r);
-      const idVal = getCellValue(masterRow.getCell(1));
-      if (!idVal || idVal === '' || idVal === '0') continue;
+    // Rows 3 to ... matching rowIndex
+    data.forms.forEach(form => {
+      const outRow = ws1.getRow(form.rowIndex);
+      const ev = form.evaluations[reviewer.name] || {};
 
-      const outRow = ws1.getRow(r);
-      const cell = outRow.getCell(1);
-      const masterCell = masterRow.getCell(reviewerCol);
+      const commentCell = outRow.getCell(1);
+      const scoreCell = outRow.getCell(2);
 
-      const val = getCellValue(masterCell);
-      cell.value = val;
+      commentCell.value = ev.comment || '';
+      scoreCell.value = ev.score !== null && ev.score !== undefined ? ev.score : '';
 
-      let fillArgb = null;
-      if (masterCell.style && masterCell.style.fill && masterCell.style.fill.fgColor && masterCell.style.fill.fgColor.argb) {
-        fillArgb = masterCell.style.fill.fgColor.argb;
-      }
-      fillArgb = inferRatingColor(val, fillArgb);
-
+      const fillArgb = ev.fillColor;
       if (fillArgb && fillArgb !== '00000000') {
-        cell.fill = {
-          type: 'pattern',
-          pattern: 'solid',
-          fgColor: { argb: fillArgb }
+        commentCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: fillArgb } };
+        scoreCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: fillArgb } };
+      }
+
+      commentCell.font = { name: 'Calibri', size: 11, color: { argb: 'FF000000' } };
+      commentCell.alignment = { wrapText: true, vertical: 'top', horizontal: 'left' };
+
+      scoreCell.font = { name: 'Calibri', size: 12, bold: true, color: { argb: 'FF000000' } };
+      scoreCell.alignment = { vertical: 'middle', horizontal: 'center' };
+
+      [1, 2].forEach(c => {
+        outRow.getCell(c).border = {
+          top: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+          bottom: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+          left: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+          right: { style: 'thin', color: { argb: 'FFE2E8F0' } }
         };
-      }
+      });
 
-      cell.font = { name: 'Calibri', size: 11, color: { argb: 'FF000000' } };
-      cell.alignment = { wrapText: true, vertical: 'top', horizontal: 'left' };
-      cell.border = {
-        top: { style: 'thin', color: { argb: 'FFE2E8F0' } },
-        bottom: { style: 'thin', color: { argb: 'FFE2E8F0' } },
-        left: { style: 'thin', color: { argb: 'FFE2E8F0' } },
-        right: { style: 'thin', color: { argb: 'FFE2E8F0' } }
-      };
-
-      if (val) {
-        outRow.height = Math.max(30, Math.min(140, String(val).split('\n').length * 18 + 12));
+      if (ev.comment) {
+        outRow.height = Math.max(30, Math.min(140, String(ev.comment).split('\n').length * 18 + 12));
       } else {
-        outRow.height = 22;
+        outRow.height = 24;
       }
 
-      // Collect data for Sheet 2
-      const candidateInfo = responseData[idVal] || {};
       candidateList.push({
-        rowIdx: r,
-        id: idVal,
-        ban: candidateInfo.ban || getCellValue(masterRow.getCell(9)) || 'N/A',
-        name: candidateInfo.name || getCellValue(masterRow.getCell(2)) || 'N/A',
-        mssv: candidateInfo.mssv || getCellValue(masterRow.getCell(3)) || 'N/A',
-        comment: val,
+        rowIdx: form.rowIndex,
+        id: form.id,
+        ban: form.ban || 'N/A',
+        name: form.data[2] || 'N/A',
+        mssv: form.data[3] || 'N/A',
+        comment: ev.comment || '',
+        score: ev.score,
+        ratingKey: ev.ratingKey,
         fillArgb: fillArgb
       });
-    }
+    });
 
     // ----------------------------------------------------
-    // Sheet 2: Bảng Đối Chiếu Chi Tiết (Có đầy đủ thông tin để kiểm tra)
+    // Sheet 2: Doi_Chieu_Chi_Tiet
     // ----------------------------------------------------
     const ws2 = wbOut.addWorksheet('Doi_Chieu_Chi_Tiet');
     ws2.columns = [
@@ -512,13 +362,13 @@ app.get('/api/export-excel', async (req, res) => {
       { header: 'Ban', key: 'ban', width: 24 },
       { header: 'Họ và tên', key: 'name', width: 26 },
       { header: 'MSSV', key: 'mssv', width: 16 },
-      { header: 'Đánh giá (' + reviewerName + ')', key: 'comment', width: 65 },
-      { header: 'Màu / Xếp loại', key: 'ratingName', width: 18 }
+      { header: 'Đánh giá (' + reviewer.name + ')', key: 'comment', width: 65 },
+      { header: 'Điểm (1-5)', key: 'score', width: 14 },
+      { header: 'Màu / Xếp loại', key: 'ratingName', width: 20 }
     ];
 
-    // Format Sheet 2 Header
     const s2Header = ws2.getRow(1);
-    s2Header.height = 26;
+    s2Header.height = 28;
     s2Header.eachCell(c => {
       c.font = { name: 'Calibri', size: 11, bold: true, color: { argb: 'FFFFFFFF' } };
       c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1E293B' } };
@@ -526,11 +376,11 @@ app.get('/api/export-excel', async (req, res) => {
     });
 
     const ratingNames = {
-      'FF00C853': 'Cực tốt (Xanh lá)',
-      'FF2196F3': 'Tốt (Xanh dương)',
-      'FFFFD600': 'Tạm (Vàng)',
-      'FFFF9100': 'OK (Cam)',
-      'FFFF1744': 'Tệ (Đỏ)'
+      'excellent': 'Cực tốt (5đ)',
+      'good': 'Tốt (4đ)',
+      'fair': 'Tạm (3đ)',
+      'ok': 'OK (2đ)',
+      'poor': 'Tệ (1đ)'
     };
 
     candidateList.forEach(cand => {
@@ -541,18 +391,19 @@ app.get('/api/export-excel', async (req, res) => {
         name: cand.name,
         mssv: cand.mssv,
         comment: cand.comment,
-        ratingName: cand.fillArgb ? (ratingNames[cand.fillArgb] || 'Đã chấm') : (cand.comment ? 'Chưa chọn màu' : 'Chưa chấm')
+        score: cand.score !== null && cand.score !== undefined ? `${cand.score} điểm` : 'Chưa chấm',
+        ratingName: cand.ratingKey && ratingNames[cand.ratingKey] ? ratingNames[cand.ratingKey] : (cand.comment ? 'Chưa chọn màu' : 'Chưa chấm')
       });
 
-      // Cell style for Comment and Rating in Sheet 2
       const commentCell = addedRow.getCell(6);
+      const scoreCell = addedRow.getCell(7);
+
       commentCell.alignment = { wrapText: true, vertical: 'top', horizontal: 'left' };
+      scoreCell.alignment = { horizontal: 'center', vertical: 'middle' };
+
       if (cand.fillArgb && cand.fillArgb !== '00000000') {
-        commentCell.fill = {
-          type: 'pattern',
-          pattern: 'solid',
-          fgColor: { argb: cand.fillArgb }
-        };
+        commentCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: cand.fillArgb } };
+        scoreCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: cand.fillArgb } };
       }
 
       addedRow.getCell(1).alignment = { horizontal: 'center', vertical: 'top' };
@@ -560,7 +411,7 @@ app.get('/api/export-excel', async (req, res) => {
       addedRow.getCell(3).alignment = { vertical: 'top' };
       addedRow.getCell(4).alignment = { vertical: 'top' };
       addedRow.getCell(5).alignment = { horizontal: 'center', vertical: 'top' };
-      addedRow.getCell(7).alignment = { horizontal: 'center', vertical: 'top' };
+      addedRow.getCell(8).alignment = { horizontal: 'center', vertical: 'top' };
 
       addedRow.eachCell(c => {
         c.font = { name: 'Calibri', size: 11 };
@@ -575,13 +426,12 @@ app.get('/api/export-excel', async (req, res) => {
       if (cand.comment) {
         addedRow.height = Math.max(28, Math.min(140, String(cand.comment).split('\n').length * 18 + 10));
       } else {
-        addedRow.height = 22;
+        addedRow.height = 24;
       }
     });
 
-    // Send file
-    const safeReviewer = reviewerName.replace(/[^a-zA-Z0-9_\u00C0-\u1EF9]/g, '_');
-    const filename = `Danh_gia_${safeReviewer}_1cot.xlsx`;
+    const safeReviewer = reviewer.name.replace(/[^a-zA-Z0-9_\u00C0-\u1EF9]/g, '_');
+    const filename = `Danh_gia_${safeReviewer}_kem_diem.xlsx`;
 
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(filename)}"`);
@@ -594,7 +444,371 @@ app.get('/api/export-excel', async (req, res) => {
   }
 });
 
+// GET /api/export-candidate-excel - Export dedicated Excel file for ONE candidate
+app.get('/api/export-candidate-excel', async (req, res) => {
+  try {
+    const candidateId = parseInt(req.query.id);
+    if (!candidateId) {
+      return res.status(400).json({ error: 'Cần cung cấp ID ứng viên' });
+    }
+
+    const data = await googleSheetsService.fetchFromGoogleSheet(false);
+    const form = data.forms.find(f => f.id === candidateId);
+
+    if (!form) {
+      return res.status(404).json({ error: `Không tìm thấy ứng viên ID #${candidateId}` });
+    }
+
+    const wbOut = new ExcelJS.Workbook();
+    wbOut.creator = 'Signal From The Deep Ocean - Form Evaluator';
+    wbOut.created = new Date();
+
+    const ratingNames = {
+      'excellent': 'Cực tốt (5đ)',
+      'good': 'Tốt (4đ)',
+      'fair': 'Tạm (3đ)',
+      'ok': 'OK (2đ)',
+      'poor': 'Tệ (1đ)'
+    };
+
+    // ----------------------------------------------------
+    // Sheet 1: Đánh giá chi tiết của ứng viên
+    // ----------------------------------------------------
+    const ws1 = wbOut.addWorksheet('Danh_Gia_Tong_Hop');
+    ws1.getColumn(1).width = 8;
+    ws1.getColumn(2).width = 22;
+    ws1.getColumn(3).width = 16;
+    ws1.getColumn(4).width = 20;
+    ws1.getColumn(5).width = 75;
+
+    // Title banner
+    ws1.mergeCells('A1:E1');
+    const r1 = ws1.getCell('A1');
+    r1.value = `ĐÁNH GIÁ ỨNG VIÊN: ${form.data[2] || 'N/A'} (ID: #${form.id})`;
+    r1.font = { name: 'Calibri', size: 14, bold: true, color: { argb: 'FFFFFFFF' } };
+    r1.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0F172A' } };
+    r1.alignment = { horizontal: 'center', vertical: 'middle' };
+    ws1.getRow(1).height = 36;
+
+    // Candidate metadata
+    const metaRows = [
+      ['Họ và tên:', form.data[2] || 'N/A', 'MSSV:', form.data[3] || 'N/A'],
+      ['Ban ứng tuyển:', form.ban || 'N/A', 'Lớp:', form.data[5] || 'N/A'],
+      ['Email:', form.data[4] || 'N/A', 'Form ID:', `#${form.id}`]
+    ];
+
+    metaRows.forEach((m, idx) => {
+      const rowIdx = 3 + idx;
+      const row = ws1.getRow(rowIdx);
+      row.getCell(2).value = m[0];
+      row.getCell(2).font = { name: 'Calibri', size: 11, bold: true, color: { argb: 'FF475569' } };
+      row.getCell(3).value = m[1];
+      row.getCell(3).font = { name: 'Calibri', size: 11, bold: true };
+      row.getCell(4).value = m[2];
+      row.getCell(4).font = { name: 'Calibri', size: 11, bold: true, color: { argb: 'FF475569' } };
+      row.getCell(5).value = m[3];
+      row.getCell(5).font = { name: 'Calibri', size: 11 };
+      row.height = 22;
+    });
+
+    // Reviewer table header at row 7
+    const hRow = ws1.getRow(7);
+    hRow.values = ['', 'STT', 'Giám khảo', 'Điểm số (1-5)', 'Mức xếp loại', 'Nhận xét chi tiết'];
+    // Re-assign correctly to columns 1-5
+    ws1.getCell('A7').value = 'STT';
+    ws1.getCell('B7').value = 'Giám khảo';
+    ws1.getCell('C7').value = 'Điểm số (1-5)';
+    ws1.getCell('D7').value = 'Mức xếp loại';
+    ws1.getCell('E7').value = 'Nhận xét chi tiết';
+
+    ['A7', 'B7', 'C7', 'D7', 'E7'].forEach(addr => {
+      const cell = ws1.getCell(addr);
+      cell.font = { name: 'Calibri', size: 11, bold: true, color: { argb: 'FFFFFFFF' } };
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1E293B' } };
+      cell.alignment = { horizontal: 'center', vertical: 'middle' };
+    });
+    hRow.height = 28;
+
+    let totalScore = 0;
+    let ratedCount = 0;
+    let currRow = 8;
+
+    data.reviewers.forEach((rev, revIdx) => {
+      const ev = form.evaluations && form.evaluations[rev.name];
+      const row = ws1.getRow(currRow);
+
+      const hasRated = ev && (ev.score !== null && ev.score !== undefined);
+      if (hasRated) {
+        totalScore += parseInt(ev.score);
+        ratedCount++;
+      }
+
+      row.getCell(1).value = revIdx + 1;
+      row.getCell(2).value = rev.name;
+      row.getCell(3).value = hasRated ? `${ev.score} điểm` : 'Chưa chấm';
+      row.getCell(4).value = ev?.ratingKey && ratingNames[ev.ratingKey] ? ratingNames[ev.ratingKey] : (hasRated ? 'Đã chấm' : '-');
+      row.getCell(5).value = ev?.comment || (hasRated ? '(Không có nhận xét chữ)' : 'Chưa có đánh giá');
+
+      row.getCell(1).alignment = { horizontal: 'center', vertical: 'top' };
+      row.getCell(2).alignment = { horizontal: 'center', vertical: 'top' };
+      row.getCell(3).alignment = { horizontal: 'center', vertical: 'top' };
+      row.getCell(4).alignment = { horizontal: 'center', vertical: 'top' };
+      row.getCell(5).alignment = { wrapText: true, vertical: 'top', horizontal: 'left' };
+
+      const fillArgb = ev?.fillColor;
+      if (fillArgb && fillArgb !== '00000000') {
+        row.getCell(3).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: fillArgb } };
+        row.getCell(4).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: fillArgb } };
+      }
+
+      [1, 2, 3, 4, 5].forEach(col => {
+        row.getCell(col).font = { name: 'Calibri', size: 11 };
+        row.getCell(col).border = {
+          top: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+          bottom: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+          left: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+          right: { style: 'thin', color: { argb: 'FFE2E8F0' } }
+        };
+      });
+
+      row.height = ev?.comment ? Math.max(28, Math.min(120, String(ev.comment).split('\n').length * 18 + 10)) : 24;
+      currRow++;
+    });
+
+    // Summary Total & Avg Row
+    const sumRow = ws1.getRow(currRow);
+    sumRow.getCell(1).value = '';
+    sumRow.getCell(2).value = 'TỔNG ĐIỂM / TRUNG BÌNH';
+    sumRow.getCell(3).value = `${totalScore} điểm`;
+    sumRow.getCell(4).value = ratedCount > 0 ? `TB: ${(totalScore / ratedCount).toFixed(2)} ★` : '0 ★';
+    sumRow.getCell(5).value = `Đã có ${ratedCount}/${data.reviewers.length} giám khảo hoàn thành đánh giá`;
+
+    [2, 3, 4, 5].forEach(c => {
+      sumRow.getCell(c).font = { name: 'Calibri', size: 11, bold: true, color: { argb: 'FF000000' } };
+      sumRow.getCell(c).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFF176' } };
+      sumRow.getCell(c).border = {
+        top: { style: 'medium', color: { argb: 'FFCBD5E1' } },
+        bottom: { style: 'medium', color: { argb: 'FFCBD5E1' } }
+      };
+    });
+    sumRow.getCell(2).alignment = { horizontal: 'center', vertical: 'middle' };
+    sumRow.getCell(3).alignment = { horizontal: 'center', vertical: 'middle' };
+    sumRow.getCell(4).alignment = { horizontal: 'center', vertical: 'middle' };
+    sumRow.getCell(5).alignment = { vertical: 'middle' };
+    sumRow.height = 30;
+
+    // ----------------------------------------------------
+    // Sheet 2: Toàn bộ câu trả lời form của ứng viên
+    // ----------------------------------------------------
+    const ws2 = wbOut.addWorksheet('Cau_Tra_Loi_Chi_Tiet');
+    ws2.getColumn(1).width = 10;
+    ws2.getColumn(2).width = 38;
+    ws2.getColumn(3).width = 85;
+
+    const s2H = ws2.getRow(1);
+    s2H.values = ['Mã cột', 'Câu hỏi / Hạng mục', 'Nội dung câu trả lời của ứng viên'];
+    ['A1', 'B1', 'C1'].forEach(addr => {
+      const cell = ws2.getCell(addr);
+      cell.font = { name: 'Calibri', size: 11, bold: true, color: { argb: 'FFFFFFFF' } };
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1E293B' } };
+      cell.alignment = { horizontal: 'center', vertical: 'middle' };
+    });
+    s2H.height = 28;
+
+    for (let c = 1; c <= 24; c++) {
+      const label = data.columnMap[c] || `Cột ${c}`;
+      const answer = form.data[c] || '';
+      const r = ws2.addRow([`C${c}`, label, answer]);
+
+      r.getCell(1).alignment = { horizontal: 'center', vertical: 'top' };
+      r.getCell(2).alignment = { vertical: 'top' };
+      r.getCell(2).font = { name: 'Calibri', size: 11, bold: true };
+      r.getCell(3).alignment = { wrapText: true, vertical: 'top' };
+      r.getCell(3).font = { name: 'Calibri', size: 11 };
+
+      [1, 2, 3].forEach(col => {
+        r.getCell(col).border = {
+          top: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+          bottom: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+          left: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+          right: { style: 'thin', color: { argb: 'FFE2E8F0' } }
+        };
+      });
+
+      r.height = answer ? Math.max(26, Math.min(140, String(answer).split('\n').length * 18 + 10)) : 22;
+    }
+
+    const safeName = (form.data[2] || 'Ung_vien').replace(/[^a-zA-Z0-9_\u00C0-\u1EF9]/g, '_');
+    const filename = `Danh_gia_Ung_vien_${form.id}_${safeName}.xlsx`;
+
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(filename)}"`);
+
+    await wbOut.xlsx.write(res);
+    res.end();
+  } catch (error) {
+    console.error('Error exporting candidate excel:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// GET /api/export-summary-excel - Export full leaderboard/summary of all candidates
+app.get('/api/export-summary-excel', async (req, res) => {
+  try {
+    const data = await googleSheetsService.fetchFromGoogleSheet(false);
+    const wbOut = new ExcelJS.Workbook();
+    wbOut.creator = 'Signal From The Deep Ocean - Form Evaluator';
+    wbOut.created = new Date();
+
+    const ws = wbOut.addWorksheet('Bang_Tong_Hop_Diem');
+
+    // Calculate score metrics for each form
+    const rankedForms = data.forms.map(form => {
+      let totalScore = 0;
+      let ratedCount = 0;
+      data.reviewers.forEach(rev => {
+        const ev = form.evaluations && form.evaluations[rev.name];
+        if (ev && ev.score !== null && ev.score !== undefined) {
+          totalScore += parseInt(ev.score);
+          ratedCount++;
+        }
+      });
+      const avgScore = ratedCount > 0 ? parseFloat((totalScore / ratedCount).toFixed(2)) : 0;
+      return { form, totalScore, ratedCount, avgScore };
+    });
+
+    // Sort by Total Score descending
+    rankedForms.sort((a, b) => {
+      if (b.totalScore !== a.totalScore) return b.totalScore - a.totalScore;
+      if (b.avgScore !== a.avgScore) return b.avgScore - a.avgScore;
+      return a.form.id - b.form.id;
+    });
+
+    // Columns configuration
+    const cols = [
+      { header: 'Hạng', key: 'rank', width: 8 },
+      { header: 'ID', key: 'id', width: 8 },
+      { header: 'Họ và tên', key: 'name', width: 24 },
+      { header: 'MSSV', key: 'mssv', width: 14 },
+      { header: 'Ban ứng tuyển', key: 'ban', width: 22 },
+      { header: 'Lớp', key: 'class', width: 14 },
+      { header: 'Email', key: 'email', width: 28 }
+    ];
+
+    data.reviewers.forEach(rev => {
+      cols.push({ header: `Điểm (${rev.name})`, key: `score_${rev.name}`, width: 15 });
+    });
+
+    cols.push(
+      { header: 'Tổng điểm', key: 'totalScore', width: 14 },
+      { header: 'Điểm TB', key: 'avgScore', width: 14 },
+      { header: 'Số GK đã chấm', key: 'ratedCount', width: 16 }
+    );
+
+    ws.columns = cols;
+
+    // Header styling
+    const headerRow = ws.getRow(1);
+    headerRow.height = 30;
+    headerRow.eachCell(c => {
+      c.font = { name: 'Calibri', size: 11, bold: true, color: { argb: 'FFFFFFFF' } };
+      c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0F172A' } };
+      c.alignment = { horizontal: 'center', vertical: 'middle' };
+    });
+
+    rankedForms.forEach((item, idx) => {
+      const f = item.form;
+      const rowData = {
+        rank: idx + 1,
+        id: f.id,
+        name: f.data[2] || 'N/A',
+        mssv: f.data[3] || 'N/A',
+        ban: f.ban || 'N/A',
+        class: f.data[5] || 'N/A',
+        email: f.data[4] || 'N/A',
+        totalScore: item.totalScore,
+        avgScore: item.avgScore,
+        ratedCount: `${item.ratedCount}/${data.reviewers.length}`
+      };
+
+      data.reviewers.forEach(rev => {
+        const ev = f.evaluations && f.evaluations[rev.name];
+        rowData[`score_${rev.name}`] = ev && ev.score !== null && ev.score !== undefined ? `${ev.score}đ` : '-';
+      });
+
+      const added = ws.addRow(rowData);
+      added.height = 24;
+
+      added.getCell(1).alignment = { horizontal: 'center', vertical: 'middle' };
+      added.getCell(2).alignment = { horizontal: 'center', vertical: 'middle' };
+      added.getCell(4).alignment = { horizontal: 'center', vertical: 'middle' };
+      added.getCell(5).alignment = { horizontal: 'center', vertical: 'middle' };
+      added.getCell(6).alignment = { horizontal: 'center', vertical: 'middle' };
+
+      // Reviewer score styling
+      let colIdx = 8;
+      data.reviewers.forEach(rev => {
+        const ev = f.evaluations && f.evaluations[rev.name];
+        const cell = added.getCell(colIdx);
+        cell.alignment = { horizontal: 'center', vertical: 'middle' };
+        if (ev && ev.fillColor && ev.fillColor !== '00000000') {
+          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: ev.fillColor } };
+          cell.font = { bold: true };
+        }
+        colIdx++;
+      });
+
+      // Total Score & Avg styling
+      const totalCell = added.getCell(colIdx);
+      totalCell.alignment = { horizontal: 'center', vertical: 'middle' };
+      totalCell.font = { bold: true, size: 11, color: { argb: 'FF0369A1' } };
+
+      const avgCell = added.getCell(colIdx + 1);
+      avgCell.alignment = { horizontal: 'center', vertical: 'middle' };
+      avgCell.font = { bold: true };
+
+      const countCell = added.getCell(colIdx + 2);
+      countCell.alignment = { horizontal: 'center', vertical: 'middle' };
+
+      added.eachCell(c => {
+        c.font = c.font || { name: 'Calibri', size: 11 };
+        c.border = {
+          top: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+          bottom: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+          left: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+          right: { style: 'thin', color: { argb: 'FFE2E8F0' } }
+        };
+      });
+    });
+
+    const filename = `Bang_tong_hop_diem_Trainee_Program_2026.xlsx`;
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(filename)}"`);
+
+    await wbOut.xlsx.write(res);
+    res.end();
+  } catch (error) {
+    console.error('Error exporting summary excel:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Periodic background sync from Google Sheet every 25 seconds
+setInterval(async () => {
+  try {
+    const updated = await googleSheetsService.fetchFromGoogleSheet(true);
+    // Broadcast sync event to all connected clients
+    if (clients.size > 0) {
+      broadcast({ type: 'DATA_REFRESHED', lastSynced: updated.lastSynced });
+    }
+  } catch (err) {
+    // Silent background error
+  }
+}, 25000);
+
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`🌊 Form Evaluation Server running on port ${PORT}`);
+server.listen(PORT, () => {
+  console.log(`🌊 Signal Form Evaluator Server running on port ${PORT}`);
+  console.log(`📊 Connected to Google Sheet: https://docs.google.com/spreadsheets/d/1EkPPK0w5yLrSAGAxsbb3Td8lYZcpuYda4XxFONUyS0E`);
+  console.log(`⚡ WebSocket live sync enabled`);
 });

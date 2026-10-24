@@ -1,6 +1,6 @@
 # 🌊 Signal From The Deep Ocean — Form Evaluator
 
-> **TRAINEE PROGRAM 2026** — Hệ thống hỗ trợ Ban Giám Khảo đánh giá, chấm điểm và phân loại hồ sơ ứng tuyển trực quan, đồng bộ trực tiếp hai chiều với file Excel.
+> **TRAINEE PROGRAM 2026** — Hệ thống hỗ trợ Ban Giám Khảo đánh giá, chấm điểm và phân loại hồ sơ ứng tuyển trực quan, kết nối Google Sheets API hai chiều và đồng bộ thời gian thực qua WebSocket.
 
 ---
 
@@ -8,17 +8,35 @@
 
 **Signal From The Deep Ocean - Form Evaluator** là ứng dụng web nội bộ được thiết kế nhằm tối ưu hóa quy trình chấm đơn ứng tuyển trong chiến dịch tuyển quân **Trainee Program 2026**. 
 
-Thay vì phải thao tác thủ công trên các bảng tính Excel cồng kềnh với hàng chục cột dữ liệu dài, ứng dụng cung cấp giao diện trực quan, chia đôi màn hình (Split Layout), tự động lọc câu hỏi theo từng ban chuyên môn và đồng bộ dữ liệu hai chiều trực tiếp với file Excel gốc.
+Hệ thống kết nối trực tiếp với **Google Sheet**:
+👉 **[Google Sheet form-review](https://docs.google.com/spreadsheets/d/1EkPPK0w5yLrSAGAxsbb3Td8lYZcpuYda4XxFONUyS0E/edit?gid=0#gid=0)**
+
+Mọi thao tác đánh giá, chấm điểm số (1 - 5) và nhận xét của ban giám khảo đều được tự động lưu trực tiếp vào Google Sheet với đầy đủ màu sắc, đồng thời đồng bộ ngay lập tức tới các giám khảo khác đang mở web bằng công nghệ **WebSocket Real-time**.
 
 ---
 
 ## ✨ Tính năng nổi bật
 
-### 1. 🔄 Đồng bộ 2 chiều với file Excel gốc (Realtime Excel Integration)
-- **Đọc dữ liệu tự động**: Tự động nhận diện file `.xlsx` trong thư mục gốc, đọc danh sách câu trả lời từ sheet `RESPONSES` và thông tin đánh giá từ sheet `ĐÁNH GIÁ`.
-- **Lưu trực tiếp vào Excel**: Mỗi khi giám khảo lưu nhận xét và mức xếp loại, hệ thống tự động ghi nội dung và tô màu ô tương ứng của giám khảo đó vào sheet `ĐÁNH GIÁ` bằng thư viện `ExcelJS`.
+### 1. 🌐 Liên kết Google Sheets API hai chiều (Google Sheets API Integration)
+- **Kết nối chính thức**: Kết nối bảo mật thông qua Google Cloud Service Account tới bảng tính [form-review](https://docs.google.com/spreadsheets/d/1EkPPK0w5yLrSAGAxsbb3Td8lYZcpuYda4XxFONUyS0E/edit?gid=0#gid=0).
+- **Tự động lưu và cập nhật**: Mọi đánh giá nhận xét và thang điểm màu sắc đều được lưu tự động lên sheet `ĐÁNH GIÁ` trên Google Sheets theo thời gian thực.
+- **Dự phòng file Excel nội bộ**: Đồng thời lưu bản sao dự phòng vào file `.xlsx` nội bộ.
 
-### 2. 🎨 Giao diện Deep Ocean Theme & Split Layout hiện đại
+### 2. 🎯 Hệ thống điểm số 1 đến 5 & Cột điểm tổng hợp riêng cho từng giám khảo
+- **Quy đổi điểm số tự động từ màu đánh giá**:
+  - 🟢 **Cực tốt** (`#00C853`) ➔ **5 điểm**
+  - 🔵 **Tốt** (`#2196F3`) ➔ **4 điểm**
+  - 🟡 **Tạm** (`#FFD600`) ➔ **3 điểm**
+  - 🟠 **OK** (`#FF9100`) ➔ **2 điểm**
+  - 🔴 **Tệ** (`#FF1744`) ➔ **1 điểm**
+- **Cột điểm riêng biệt trong Google Sheet**: Với mỗi giám khảo, ngoài cột nhận xét còn có một **cột điểm mới** (`Điểm - <Tên Giám Khảo>`) ghi rõ số điểm 1 - 5 của riêng giám khảo đó cho từng form, được căn giữa và tô màu nền khớp chuẩn với màu đánh giá.
+- **Hỗ trợ phím tắt số**: Nhấn trực tiếp các phím <kbd>1</kbd>, <kbd>2</kbd>, <kbd>3</kbd>, <kbd>4</kbd>, <kbd>5</kbd> trên bàn phím để chọn điểm số nhanh.
+
+### 3. ⚡ Đồng bộ phần "Đánh giá từ người khác" Real-time qua WebSocket
+- **Live Sync tức thì**: Khi giám khảo A lưu nhận xét hoặc điểm số của một ứng viên, màn hình của giám khảo B (nếu đang xem cùng ứng viên đó) sẽ ngay lập tức cập nhật nhận xét và badge điểm số của giám khảo A cùng hiệu ứng highlight phát sáng.
+- **Thanh trạng thái kết nối**: Header hiển thị trạng thái `🟢 GG Sheet: Đồng bộ` và nút `🔄 Đồng bộ` giúp tải lại dữ liệu từ Google Sheet bất cứ lúc nào.
+
+### 4. 🎨 Giao diện Deep Ocean Theme & Split Layout hiện đại
 - **Phong cách thiết kế**: Chủ đề đại dương sâu thẳm với hiệu ứng kính mờ (Glassmorphism), bong bóng nước và sóng biển chuyển động mượt mà.
 - **Cột trái (Nội dung bài làm)**:
   - Hiển thị đầy đủ thông tin ứng viên: Họ tên, MSSV, Lớp sinh hoạt, Email.
@@ -26,38 +44,33 @@ Thay vì phải thao tác thủ công trên các bảng tính Excel cồng kền
   - Tự động nhận diện đường link (Drive, GitHub, Behance, Figma, Portfolio,...) và chuyển đổi thành liên kết có thể nhấp mở ngay ở tab mới.
 - **Cột phải (Bảng chấm điểm & Đánh giá)**:
   - Cố định khi cuộn trang, giúp giám khảo dễ dàng đối chiếu và nhập nhận xét.
-  - 5 nút xếp loại màu sắc trực quan:
-    - 🟢 **Cực tốt** (`#00C853`)
-    - 🔵 **Tốt** (`#2196F3`)
-    - 🟡 **Tạm** (`#FFD600`)
-    - 🟠 **OK / Ấy** (`#FF9100`)
-    - 🔴 **Tệ** (`#FF1744`)
+  - 5 nút xếp loại màu sắc và điểm số trực quan kèm badge điểm (5đ, 4đ, 3đ, 2đ, 1đ).
   - Ô nhận xét đa dòng (`textarea`) có hỗ trợ tự động lưu.
   - Phím thao tác: **Lưu đánh giá** hoặc **Lưu & Tiếp theo →** để tự động chuyển sang ứng viên kế tiếp.
 
-### 3. 🏢 Lọc và phân loại theo Ban chuyên môn
+### 5. 🏢 Lọc và phân loại theo Ban chuyên môn
 - Hỗ trợ 2 ban tuyển dụng chính:
   - ⚙️ **Ban Hệ thống**
   - 📢 **Ban Truyền thông - Sự kiện (TT-SK)**
 - Giao diện tự động lọc danh sách thí sinh đăng ký theo từng ban và chỉ hiển thị đúng các trường câu hỏi chuyên môn liên quan.
 
-### 4. 👥 Quản lý người chấm (Reviewers) & Đánh giá chéo
-- **Thêm người chấm mới**: Tự động cấp thêm cột mới trong sheet Excel.
-- **Quản lý & Xóa người chấm**: Giao diện quản trị viên cho phép xem danh sách người chấm, số lượng form đã hoàn thành và hỗ trợ xóa tài khoản thừa (tự động dồn các cột còn lại sang trái trong Excel mà không làm hỏng cấu trúc file).
-- **Xem chéo đánh giá**: Giám khảo có thể xem các đánh giá, mức phân loại màu và nhận xét của các giám khảo khác về cùng một ứng viên.
+### 6. 👥 Quản lý người chấm (Reviewers) & Đánh giá chéo
+- **Thêm người chấm mới**: Tự động tạo thêm cột nhận xét và cột điểm số tương ứng trên Google Sheet.
+- **Quản lý & Xóa người chấm**: Giao diện quản trị viên cho phép xem danh sách người chấm, số lượng form đã hoàn thành và xóa tài khoản thừa.
 
-### 5. ⚡ Phím tắt tiện lợi (Fast Keyboard Navigation)
+### 7. ⚡ Phím tắt tiện lợi (Fast Keyboard Navigation)
 Tối ưu tốc độ chấm bài bằng bàn phím mà không cần rê chuột liên tục:
 | Phím tắt | Chức năng |
 | :--- | :--- |
-| <kbd>Ctrl</kbd> + <kbd>S</kbd> hoặc <kbd>Cmd</kbd> + <kbd>S</kbd> | Lưu đánh giá form hiện tại |
+| <kbd>1</kbd> .. <kbd>5</kbd> | Chọn nhanh mức điểm từ 1 đến 5 (Tệ ➔ Cực tốt) |
+| <kbd>Ctrl</kbd> + <kbd>S</kbd> hoặc <kbd>Cmd</kbd> + <kbd>S</kbd> | Lưu đánh giá form hiện tại lên Google Sheet |
 | <kbd>A</kbd> hoặc <kbd>◀</kbd> (Mũi tên trái) | Chuyển về form ứng viên trước |
 | <kbd>D</kbd> hoặc <kbd>▶</kbd> (Mũi tên phải) | Chuyển sang form ứng viên kế tiếp |
 
-### 6. 📊 Xuất báo cáo kết quả linh hoạt
-- **Xuất Excel 1 cột chuẩn (`Danh_gia_<Tên>_1cot.xlsx`)**:
-  - **Sheet 1 (`Cot_Copy_Vao_File_Tong`)**: Chứa 1 cột duy nhất bao gồm đánh giá của cả 2 ban (Hệ thống & TT-SK), giữ **chính xác 100% số thứ tự dòng** tương ứng với file tổng của BTC, giữ nguyên màu fill đánh giá. Giám khảo chỉ cần sao chép toàn bộ cột này và dán thẳng vào cột của mình trên file Google Sheets/Excel tổng.
-  - **Sheet 2 (`Doi_Chieu_Chi_Tiet`)**: Bảng tổng hợp đầy đủ số dòng, ID, Ban, Họ tên, MSSV, nhận xét và xếp loại để dễ dàng rà soát, đối chiếu.
+### 8. 📊 Xuất báo cáo kết quả linh hoạt
+- **Xuất Excel có cột điểm (`Danh_gia_<Tên>_kem_diem.xlsx`)**:
+  - **Sheet 1 (`Cot_Copy_Vao_File_Tong`)**: Chứa cột Nhận xét và cột Điểm số (1-5) với màu nền đầy đủ, giữ **chính xác 100% số thứ tự dòng** tương ứng với form ứng viên.
+  - **Sheet 2 (`Doi_Chieu_Chi_Tiet`)**: Bảng tổng hợp đầy đủ số dòng, ID, Ban, Họ tên, MSSV, nhận xét, điểm số và xếp loại để dễ dàng rà soát, đối chiếu.
 - **Tải file TXT (`.txt`)**: Xuất toàn bộ đánh giá ra định dạng text gọn nhẹ, tiện lợi cho việc lưu trữ offline hoặc gửi báo cáo nhanh qua tin nhắn.
 
 ---

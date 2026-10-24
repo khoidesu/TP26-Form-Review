@@ -4,3 +4,7 @@ node_modules/
 .env
 .env.local
 .vercel
+*480914*.json
+*service-account*.json
+*credentials*.json
+*.key.json
