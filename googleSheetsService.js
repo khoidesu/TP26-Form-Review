@@ -161,7 +161,9 @@ async function getSheetMetadata() {
   const evalSheet = res.data.sheets.find(s => s.properties.title === 'ĐÁNH GIÁ') || res.data.sheets[0];
   return {
     evalSheetId: evalSheet.properties.sheetId,
-    evalSheetTitle: evalSheet.properties.title
+    evalSheetTitle: evalSheet.properties.title,
+    columnCount: evalSheet.properties.gridProperties?.columnCount || 33,
+    rowCount: evalSheet.properties.gridProperties?.rowCount || 1005
   };
 }
 
@@ -315,6 +317,38 @@ async function saveEvaluation({ rowIndex, reviewerName, reviewerCol, comment, ra
 
   const commentCol = reviewer.colIndex; // 1-indexed
   const scoreCol = reviewer.scoreColIndex; // 1-indexed
+
+  // Ensure sheet has enough rows and columns if grid limits are exceeded
+  const maxRequiredCol = Math.max(commentCol, scoreCol || 0);
+  const expandRequests = [];
+  if (maxRequiredCol > meta.columnCount) {
+    const addCols = Math.max(maxRequiredCol - meta.columnCount + 8, 10);
+    expandRequests.push({
+      appendDimension: {
+        sheetId: meta.evalSheetId,
+        dimension: 'COLUMNS',
+        length: addCols
+      }
+    });
+    meta.columnCount += addCols;
+  }
+  if (rowIndex > meta.rowCount) {
+    const addRows = Math.max(rowIndex - meta.rowCount + 50, 100);
+    expandRequests.push({
+      appendDimension: {
+        sheetId: meta.evalSheetId,
+        dimension: 'ROWS',
+        length: addRows
+      }
+    });
+    meta.rowCount += addRows;
+  }
+  if (expandRequests.length > 0) {
+    await sheets.spreadsheets.batchUpdate({
+      spreadsheetId: SPREADSHEET_ID,
+      requestBody: { requests: expandRequests }
+    });
+  }
 
   // Derive score and color
   let finalScore = (score !== undefined && score !== null && score !== '') ? parseInt(score) : null;
@@ -497,6 +531,26 @@ async function addReviewer(name) {
 
   const newCommentCol = maxCol + 1; // 1-indexed
   const newScoreCol = maxCol + 2;   // 1-indexed
+
+  // Ensure sheet has enough columns to accommodate the new reviewer
+  if (newScoreCol > meta.columnCount) {
+    const additionalCols = Math.max(newScoreCol - meta.columnCount + 8, 10);
+    await sheets.spreadsheets.batchUpdate({
+      spreadsheetId: SPREADSHEET_ID,
+      requestBody: {
+        requests: [
+          {
+            appendDimension: {
+              sheetId: meta.evalSheetId,
+              dimension: 'COLUMNS',
+              length: additionalCols
+            }
+          }
+        ]
+      }
+    });
+    meta.columnCount += additionalCols;
+  }
 
   // Update Row 2 with headers
   await sheets.spreadsheets.values.update({
