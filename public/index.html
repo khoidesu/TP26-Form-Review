@@ -312,10 +312,17 @@
               <!-- Status -->
               <div class="save-status" id="save-status"></div>
             </div>
+          </div>
 
-            <!-- Other reviewers' evaluations -->
-            <div class="other-evals" id="other-evals">
-              <h3 class="eval-title"><span>👥</span> Đánh giá từ người khác</h3>
+          <!-- Other reviewers' evaluations (Separate box with independent scrollbar) -->
+          <div class="other-evals-panel glass-card" id="other-evals">
+            <div class="other-evals-header">
+              <h3 class="eval-title">
+                <span><span>👥</span> Đánh giá từ người khác</span>
+                <span class="other-evals-count-badge" id="other-evals-count-badge">0 đánh giá</span>
+              </h3>
+            </div>
+            <div class="other-evals-scroll-box" id="other-evals-scroll-box">
               <div class="other-evals-list" id="other-evals-list"></div>
             </div>
           </div>

@@ -939,17 +939,18 @@ function updateRatingButtons() {
 // Synchronize and render other evaluations
 function renderOtherEvals(form) {
   const list = $('#other-evals-list');
+  const countBadge = $('#other-evals-count-badge');
   if (!list) return;
   list.innerHTML = '';
 
-  let hasOther = false;
+  let otherCount = 0;
 
   for (const reviewer of state.reviewers) {
     if (reviewer.name === state.selectedReviewer) continue;
 
     const eval_ = form.evaluations && form.evaluations[reviewer.name];
     if (eval_ && (eval_.comment || eval_.score || eval_.fillColor || eval_.ratingKey)) {
-      hasOther = true;
+      otherCount++;
       const score = eval_.score;
       const ratingKey = eval_.ratingKey || (score ? SCORE_MAP[score] : null) || mapRatingFromColor(eval_.fillColor);
       const ratingClass = ratingKey ? `rated-${ratingKey}` : '';
@@ -981,7 +982,12 @@ function renderOtherEvals(form) {
     }
   }
 
-  if (!hasOther) {
+  if (countBadge) {
+    countBadge.textContent = otherCount > 0 ? `${otherCount} người đã chấm` : '0 đánh giá';
+    countBadge.className = `other-evals-count-badge ${otherCount > 0 ? 'has-evals' : ''}`;
+  }
+
+  if (otherCount === 0) {
     list.innerHTML = '<p class="no-evals">Chưa có đánh giá nào từ các giám khảo khác cho form này.</p>';
   }
 }

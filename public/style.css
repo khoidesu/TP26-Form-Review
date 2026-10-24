@@ -914,20 +914,82 @@ body {
   color: var(--accent-cyan);
 }
 
-/* Other Evaluations (Bottom part of right panel) */
-.other-evals {
-  padding: 20px 26px 24px;
-  border-top: 1px solid var(--border-glass);
-  background: rgba(8, 12, 34, 0.6);
+/* Other Evaluations Panel (Separate dedicated card with independent scroll) */
+.other-evals-panel {
+  margin-top: 14px;
+  padding: 18px 22px 20px;
+  border-radius: var(--radius-lg);
+  border: 1px solid rgba(56, 189, 248, 0.22);
+  background: rgba(13, 19, 44, 0.85);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.45), 0 0 24px rgba(56, 189, 248, 0.08);
+  display: flex;
+  flex-direction: column;
+}
+
+.other-evals-header {
+  margin-bottom: 12px;
+}
+
+.other-evals-header .eval-title {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 14.5px;
+  margin-bottom: 0;
+}
+
+.other-evals-count-badge {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 99px;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-muted);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  letter-spacing: 0.3px;
+  transition: all var(--transition-fast);
+}
+
+.other-evals-count-badge.has-evals {
+  background: rgba(56, 189, 248, 0.15);
+  color: var(--accent-cyan);
+  border-color: rgba(56, 189, 248, 0.3);
+}
+
+/* Dedicated independent scroll box - never pushes or scrolls away the evaluation panel */
+.other-evals-scroll-box {
+  max-height: 250px;
+  overflow-y: auto;
+  padding-right: 6px;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(56, 189, 248, 0.35) rgba(15, 23, 56, 0.3);
+}
+
+.other-evals-scroll-box::-webkit-scrollbar {
+  width: 5px;
+}
+
+.other-evals-scroll-box::-webkit-scrollbar-track {
+  background: rgba(15, 23, 56, 0.4);
+  border-radius: 99px;
+}
+
+.other-evals-scroll-box::-webkit-scrollbar-thumb {
+  background: rgba(56, 189, 248, 0.3);
+  border-radius: 99px;
+}
+
+.other-evals-scroll-box::-webkit-scrollbar-thumb:hover {
+  background: rgba(56, 189, 248, 0.55);
 }
 
 .other-evals-list {
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  max-height: none;
-  overflow-y: visible;
-  padding-right: 0;
+  gap: 10px;
 }
 
 .other-eval-item {
@@ -1276,7 +1338,8 @@ body {
   .form-header,
   .form-content,
   .eval-section,
-  .other-evals {
+  .other-evals,
+  .other-evals-panel {
     padding-left: 20px;
     padding-right: 20px;
   }
